@@ -1,0 +1,107 @@
+# Built-in clinical vocabulary, used to steer both handwriting readers (TrOCR and SimpleHTR).
+# A word here is preferred when the handwriting is unclear, but only if the image supports it.
+# Put your own names, places and products in custom_words.txt instead of editing this file.
+
+# --- notes, headings and history
+patient history examination diagnosis provisional differential impression assessment plan management
+treatment investigations investigation findings complaints complaint presenting referral referred review
+follow clinic ward admission admitted discharge discharged outpatient inpatient casualty emergency theatre
+procedure surgery operation consultation consultant physician surgeon clinician nurse pharmacist doctor
+prescription prescribed dispensed dosage dose duration frequency route allergy allergies allergic known
+chronic acute stable unstable improving worsening resolved recurrent bilateral unilateral left right
+anterior posterior superior inferior proximal distal mild moderate severe normal abnormal positive negative
+tender tenderness swelling oedema edema pallor jaundice cyanosis dehydration dehydrated febrile afebrile
+conscious alert oriented clinically generally unremarkable significant noted reports denies associated
+onset since duration progressive intermittent persistent episodes previous past medical surgical family
+social smoker alcohol pregnant gravida para nulliparous postpartum
+# --- symptoms and signs
+fever cough headache vomiting nausea diarrhoea diarrhea constipation abdominal chest pain dizziness fatigue
+weakness malaise rash itching pruritus bleeding dyspnoea dyspnea wheeze wheezing palpitations syncope
+seizure seizures convulsions numbness tingling blurred vision photophobia redness tearing discharge
+dysuria frequency urgency haematuria hematuria polyuria polydipsia weight loss anorexia insomnia
+lymphadenopathy hepatomegaly splenomegaly murmur crepitations tachycardia bradycardia hypotension
+# --- vital signs and measurements
+temperature pulse respiratory rate blood pressure saturation oxygen weight height glucose random fasting
+systolic diastolic intraocular visual acuity
+# --- diagnoses
+hypertension hypertensive diabetes mellitus diabetic asthma asthmatic pneumonia bronchitis bronchiolitis
+tuberculosis malaria typhoid gastroenteritis gastritis peptic ulcer dyspepsia urinary tract infection
+sinusitis pharyngitis tonsillitis otitis media externa conjunctivitis glaucoma cataract keratitis uveitis
+iritis retinopathy maculopathy myopia hyperopia hypermetropia presbyopia astigmatism pterygium chalazion
+stye blepharitis amblyopia strabismus keratoconus retinal detachment dermatitis eczema psoriasis
+cellulitis abscess anaemia anemia hepatitis cirrhosis pancreatitis appendicitis cholecystitis hernia
+haemorrhoids hemorrhoids fracture sprain arthritis osteoarthritis gout rheumatoid osteoporosis epilepsy
+migraine stroke dementia depression anxiety schizophrenia psychosis bipolar obesity hyperlipidaemia
+hyperlipidemia dyslipidaemia dyslipidemia hypothyroidism hyperthyroidism goitre goiter heart failure
+cardiomyopathy arrhythmia fibrillation angina myocardial infarction ischaemic ischemic thrombosis embolism
+renal kidney nephropathy neuropathy sepsis meningitis measles cholera dysentery brucellosis
+helminthiasis amoebiasis candidiasis scabies tinea pregnancy antenatal postnatal preeclampsia eclampsia
+miscarriage abortion ectopic caesarean cesarean labour labor delivery gestation prostate hyperplasia
+benign malignant carcinoma cancer tumour tumor lesion mass cyst polyp fibroid
+# --- specialties and departments
+ophthalmology ophthalmologist ophthalmic optometry optometrist paediatrics pediatrics obstetrics
+gynaecology gynecology orthopaedics orthopedics cardiology neurology dermatology psychiatry radiology
+pathology oncology urology nephrology gastroenterology endocrinology physiotherapy dental dentistry
+otolaryngology maternity pharmacy laboratory
+# --- investigations
+haemogram hemogram haemoglobin hemoglobin platelets urinalysis stool culture sensitivity microscopy biopsy
+histology ultrasound echocardiogram electrolytes creatinine urea bilirubin lipid profile cholesterol
+triglycerides fundoscopy tonometry refraction slit lamp widal
+FBC CBC WBC HbA1c RBS FBS ECG CXR LFTs ESR CRP PSA TSH VDRL IOP
+# --- prescriptions
+tablet tablets capsule capsules syrup suspension injection infusion drops ointment cream gel lotion inhaler
+spray suppository pessary sachet vial ampoule units once twice thrice daily nocte mane hourly weekly
+topical oral before after meals food days weeks months continue stop refill dispense quantity apply instil
+tabs caps mls stat PRN BD BID TDS TID QID OD PO IV IM SC
+# --- analgesics
+paracetamol acetaminophen ibuprofen diclofenac aspirin naproxen meloxicam celecoxib tramadol codeine
+morphine pethidine ketorolac indomethacin piroxicam mefenamic
+# --- antibiotics
+amoxicillin clavulanate amoxiclav ampicillin cloxacillin flucloxacillin penicillin benzylpenicillin
+benzathine phenoxymethylpenicillin cephalexin cefalexin cefuroxime ceftriaxone cefixime cefazolin
+cefotaxime ceftazidime cefepime cefpodoxime azithromycin erythromycin clarithromycin doxycycline
+tetracycline ciprofloxacin levofloxacin ofloxacin moxifloxacin norfloxacin metronidazole tinidazole
+secnidazole gentamicin amikacin streptomycin chloramphenicol clindamycin vancomycin linezolid meropenem
+imipenem nitrofurantoin cotrimoxazole trimethoprim sulfamethoxazole fusidic mupirocin tobramycin
+# --- antifungals, antimalarials, anthelmintics, TB, HIV, antivirals
+fluconazole ketoconazole itraconazole clotrimazole miconazole nystatin griseofulvin terbinafine
+amphotericin artemether lumefantrine artesunate quinine chloroquine amodiaquine sulfadoxine pyrimethamine
+primaquine dihydroartemisinin piperaquine proguanil atovaquone mefloquine albendazole mebendazole
+praziquantel ivermectin levamisole rifampicin isoniazid pyrazinamide ethambutol rifapentine tenofovir
+lamivudine dolutegravir efavirenz nevirapine zidovudine abacavir lopinavir ritonavir atazanavir darunavir
+raltegravir emtricitabine acyclovir aciclovir valacyclovir oseltamivir
+# --- cardiovascular and diabetes
+amlodipine nifedipine felodipine enalapril lisinopril captopril ramipril perindopril losartan valsartan
+telmisartan irbesartan candesartan hydrochlorothiazide chlorthalidone indapamide furosemide frusemide
+spironolactone bendroflumethiazide atenolol metoprolol bisoprolol propranolol carvedilol labetalol
+methyldopa hydralazine nitroglycerin isosorbide digoxin amiodarone atorvastatin simvastatin rosuvastatin
+clopidogrel warfarin heparin enoxaparin rivaroxaban apixaban metformin glibenclamide gliclazide
+glimepiride glipizide insulin sitagliptin vildagliptin empagliflozin dapagliflozin pioglitazone
+mixtard actrapid
+# --- gastrointestinal, respiratory, allergy, steroids
+omeprazole esomeprazole pantoprazole lansoprazole rabeprazole ranitidine famotidine cimetidine antacid
+magnesium trisilicate aluminium hydroxide simethicone metoclopramide domperidone ondansetron promethazine
+hyoscine butylbromide loperamide bisacodyl lactulose sucralfate zinc salbutamol albuterol beclomethasone
+budesonide fluticasone salmeterol formoterol ipratropium montelukast aminophylline theophylline
+prednisolone prednisone dexamethasone hydrocortisone methylprednisolone betamethasone cetirizine
+loratadine chlorphenamine chlorpheniramine desloratadine fexofenadine diphenhydramine ambroxol bromhexine
+carbocisteine dextromethorphan guaifenesin
+# --- nervous system and mental health
+diazepam lorazepam midazolam phenobarbitone phenobarbital phenytoin carbamazepine valproate lamotrigine
+levetiracetam amitriptyline fluoxetine sertraline escitalopram citalopram paroxetine haloperidol
+chlorpromazine olanzapine risperidone quetiapine lithium benzhexol trihexyphenidyl gabapentin pregabalin
+# --- eye medicines
+brinzolamide timolol latanoprost travoprost bimatoprost dorzolamide brimonidine acetazolamide pilocarpine
+tropicamide cyclopentolate atropine fluorometholone olopatadine cromoglycate hypromellose
+carboxymethylcellulose tears
+# --- vitamins, fluids, others
+folic ferrous sulphate sulfate fumarate iron multivitamin vitamin calcium pyridoxine thiamine
+cyanocobalamin ascorbic allopurinol colchicine levothyroxine carbimazole misoprostol oxytocin tamsulosin
+finasteride sildenafil methotrexate hydroxychloroquine tranexamic potassium chloride saline dextrose
+ringers lactate lignocaine lidocaine ketamine propofol adrenaline epinephrine noradrenaline
+# --- common brand names
+Panadol Augmentin Coartem Flagyl Brufen Ventolin Septrin Buscopan Piriton Zinnat Glucophage Lasix Norvasc
+Nexium Losec Diflucan Azarga Xalatan Timoptol Cosopt Combigan Ganfort Tobradex Maxitrol
+# --- forms and insurance
+NHIF SHA UHID membership scheme principal member dependant claim invoice receipt preauthorization
+authorization approved voucher signature stamp

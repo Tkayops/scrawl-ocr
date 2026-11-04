@@ -1,0 +1,17 @@
+# Python 3.9-3.11. setup.sh also installs PyTorch (CPU or GPU build, auto-detected) and
+# TensorFlow 2.15 (tensorflow-cpu; plain tensorflow on macOS), the last release that runs SimpleHTR's
+# TF1-style graph unchanged.
+numpy==1.26.4
+opencv-python-headless==4.11.0.86
+rapidocr-onnxruntime==1.4.4
+onnxruntime==1.31.1
+rapidfuzz==3.14.6
+editdistance==0.8.1
+pypdfium2==5.14.0
+pillow==13.0.0
+flask==3.1.3
+# imported by SimpleHTR's dataloader module
+lmdb==3.0.0
+path==17.1.1
+# TrOCR (accurate handwriting); setup.sh installs CPU-only torch from download.pytorch.org first
+transformers==4.57.6

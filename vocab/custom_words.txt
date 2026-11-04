@@ -1,0 +1,10 @@
+# Your own vocabulary for handwriting correction: one word or phrase per line, '#' starts a comment.
+# Words listed here are strongly preferred when a handwriting model is unsure, so add the names,
+# places, product names and jargon that appear in your documents. Plain English words (~100k) and a
+# clinical vocabulary (vocab/medical_terms.txt: diagnoses, drugs, abbreviations) are already built in.
+#
+# After editing: restart the server, or edit it in the web UI's Vocabulary tab and click "Save & reload".
+
+# examples - replace with your own (facility names, doctors, local brands)
+# Riverside Family Practice
+# Dr Achieng

@@ -1,0 +1,14 @@
+# created by setup.sh
+.venv/
+vendor/
+models/
+
+# Python
+__pycache__/
+*.pyc
+
+# local tool settings and outputs
+.claude/
+*.log
+out/
+results/

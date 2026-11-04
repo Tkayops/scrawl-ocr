@@ -1,0 +1,593 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scrawl OCR</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%237048e8'/%3E%3Cpath d='M7 20c3-9 6-9 6-3s3 6 5-1 4-6 4 0 2 4 3 2' stroke='white' stroke-width='2.6' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
+<style>
+:root {
+  --bg: #f5f4f0; --surface: #ffffff; --surface-2: #faf9f6; --ink: #1c1d21; --muted: #676b73; --line: #e2dfd8;
+  --accent: #3b5bdb; --accent-ink: #ffffff; --hw: #7048e8; --pr: #0c8599; --warn: #d9480f; --ok: #2b8a3e;
+  --hw-soft: rgba(112, 72, 232, .10); --pr-soft: rgba(12, 133, 153, .10); --warn-soft: rgba(217, 72, 15, .12);
+  --shadow: 0 1px 2px rgba(0,0,0,.05), 0 4px 16px rgba(0,0,0,.05);
+  --radius: 10px;
+  --mono: ui-monospace, "SF Mono", "Cascadia Code", "Fira Code", Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #131417; --surface: #1b1d21; --surface-2: #202227; --ink: #e9e9ec; --muted: #9b9fa8; --line: #2d3036;
+    --accent: #748ffc; --accent-ink: #0d1020; --hw: #9775fa; --pr: #3bc9db; --warn: #ff922b; --ok: #69db7c;
+    --hw-soft: rgba(151, 117, 250, .16); --pr-soft: rgba(59, 201, 219, .14); --warn-soft: rgba(255, 146, 43, .16);
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 4px 16px rgba(0,0,0,.25);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #131417; --surface: #1b1d21; --surface-2: #202227; --ink: #e9e9ec; --muted: #9b9fa8; --line: #2d3036;
+  --accent: #748ffc; --accent-ink: #0d1020; --hw: #9775fa; --pr: #3bc9db; --warn: #ff922b; --ok: #69db7c;
+  --hw-soft: rgba(151, 117, 250, .16); --pr-soft: rgba(59, 201, 219, .14); --warn-soft: rgba(255, 146, 43, .16);
+  --shadow: 0 1px 2px rgba(0,0,0,.3), 0 4px 16px rgba(0,0,0,.25);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--bg); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, sans-serif; }
+button, input, select, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; }
+
+header { display: flex; align-items: center; gap: 14px; padding: 10px 20px; border-bottom: 1px solid var(--line); background: var(--surface); }
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 650; font-size: 16px; letter-spacing: -.01em; }
+.brand small { font-weight: 450; color: var(--muted); font-size: 13px; }
+.pill { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; padding: 4px 10px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--line); color: var(--muted); font-size: 12.5px; white-space: nowrap; }
+.pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
+.pill.ready::before { background: var(--ok); }
+.pill.loading::before { background: var(--warn); animation: pulse 1s infinite alternate; }
+.pill.error { color: var(--warn); }
+.pill.error::before { background: var(--warn); }
+@keyframes pulse { to { opacity: .3; } }
+
+main { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(360px, 1fr); gap: 16px; padding: 16px 20px; height: calc(100% - 53px); }
+@media (max-width: 1000px) { main { grid-template-columns: 1fr; height: auto; padding: 12px 16px; } }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); min-height: 0; display: flex; flex-direction: column; }
+
+.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+.seg { display: inline-flex; background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: 2px; }
+.seg button { border: 0; background: none; padding: 5px 11px; border-radius: 6px; color: var(--muted); }
+.seg button[aria-checked="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,.12); font-weight: 550; }
+.ctl { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 13px; }
+.ctl input[type=range] { width: 92px; accent-color: var(--accent); }
+.ctl output { min-width: 2ch; color: var(--ink); font-variant-numeric: tabular-nums; }
+.ctl input[type=checkbox] { accent-color: var(--accent); }
+.btn { border: 1px solid var(--line); background: var(--surface); border-radius: 8px; padding: 6px 12px; white-space: nowrap; }
+.btn:hover { background: var(--surface-2); }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; font-weight: 550; }
+.btn.primary:hover { filter: brightness(1.07); }
+.btn:disabled { opacity: .45; cursor: default; }
+.spacer { flex: 1; }
+
+#viewer { position: relative; flex: 1; min-height: 360px; overflow: auto; background: var(--surface-2); border-radius: 0 0 var(--radius) var(--radius); }
+#viewer.dragover { outline: 2px dashed var(--accent); outline-offset: -8px; }
+.empty { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; gap: 6px; color: var(--muted); padding: 24px; }
+.empty strong { color: var(--ink); font-size: 16px; font-weight: 600; }
+.empty .btn { justify-self: center; margin-top: 8px; }
+.empty a { color: var(--accent); }
+#page { display: block; width: 100%; height: auto; }
+#page rect { fill: transparent; stroke-width: 2; vector-effect: non-scaling-stroke; cursor: pointer; }
+#page rect.handwriting { stroke: var(--hw); fill: var(--hw-soft); }
+#page rect.printed { stroke: var(--pr); fill: var(--pr-soft); }
+#page rect.low { stroke-dasharray: 5 3; }
+#page rect.hot { stroke-width: 3.5; fill-opacity: 2.5; }
+.busy { position: absolute; inset: 0; display: none; place-content: center; background: color-mix(in srgb, var(--surface) 70%, transparent); backdrop-filter: blur(1px); font-weight: 550; gap: 10px; text-align: center; }
+.busy.on { display: grid; }
+.spinner { width: 28px; height: 28px; border: 3px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; justify-self: center; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.pager { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 8px; border-top: 1px solid var(--line); color: var(--muted); }
+.pager[hidden] { display: none; }
+.legend { display: inline-flex; gap: 12px; color: var(--muted); font-size: 12.5px; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+
+.tabs { display: flex; gap: 2px; padding: 8px 10px 0; border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; flex-shrink: 0; }
+.tabs button { border: 0; background: none; padding: 8px 11px; border-bottom: 2px solid transparent; color: var(--muted); white-space: nowrap; }
+.tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); font-weight: 550; }
+.tabs .count { font-size: 11.5px; color: var(--muted); margin-left: 4px; font-variant-numeric: tabular-nums; }
+.actions { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 12.5px; }
+.panel { flex: 1; overflow: auto; padding: 14px 16px; min-height: 240px; }
+.panel[hidden] { display: none; }
+.placeholder { color: var(--muted); }
+pre.text { margin: 0; white-space: pre-wrap; word-break: break-word; font: 13px/1.55 var(--mono); tab-size: 6; }
+.view-toggle { display: inline-flex; margin-bottom: 12px; }
+.view-toggle button { font-size: 12.5px; padding: 3px 10px; }
+.doc { font-size: 15px; line-height: 1.55; }
+.doc h2 { font-size: 19px; margin: 18px 0 6px; letter-spacing: -.01em; }
+.doc h3 { font-size: 12.5px; font-weight: 650; letter-spacing: .05em; text-transform: uppercase; color: var(--muted);
+          margin: 18px 0 6px; padding-bottom: 4px; border-bottom: 1px solid var(--line); }
+.doc > :first-child { margin-top: 0; }
+.doc .row { display: flex; flex-wrap: wrap; gap: 2px 28px; margin: 3px 0; }
+.doc .label { font-weight: 600; color: var(--muted); }
+.doc p { margin: 3px 0; } .doc p.para { margin: 10px 0; }
+.doc .hand { color: var(--hw); }
+.doc .low { text-decoration: underline dotted var(--warn) 2px; text-underline-offset: 3px; }
+.doc [data-ids] { cursor: pointer; border-radius: 3px; }
+.doc [data-ids]:hover { background: var(--surface-2); }
+.doc .table-wrap { margin: 12px 0; }
+
+ol.lines { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.line { border: 1px solid var(--line); border-left: 3px solid var(--pr); border-radius: 8px; padding: 7px 10px; background: var(--surface); }
+.line.handwriting { border-left-color: var(--hw); }
+.line.hot { background: var(--surface-2); box-shadow: 0 0 0 1px var(--accent) inset; }
+.line-head { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--muted); }
+.line-head .num { font-variant-numeric: tabular-nums; min-width: 2ch; }
+.badge { padding: 1px 7px; border-radius: 999px; font-weight: 550; }
+.badge.handwriting { background: var(--hw-soft); color: var(--hw); }
+.badge.printed { background: var(--pr-soft); color: var(--pr); }
+.meter { width: 44px; height: 5px; border-radius: 3px; background: var(--line); overflow: hidden; }
+.meter i { display: block; height: 100%; }
+.edited { color: var(--accent); }
+.line-head .edit { margin-left: auto; border: 0; background: none; color: var(--muted); padding: 2px 4px; border-radius: 5px; }
+.line-head .edit:hover { color: var(--ink); background: var(--surface-2); }
+.line-text { margin-top: 3px; font-size: 15px; line-height: 1.55; word-break: break-word; }
+.line-text input { width: 100%; padding: 4px 6px; border: 1px solid var(--accent); border-radius: 6px; background: var(--surface); }
+.word.unsure { text-decoration: underline dotted var(--warn) 2px; text-underline-offset: 3px; cursor: pointer; border-radius: 3px; }
+.word.unsure:hover { background: var(--warn-soft); }
+.also { margin-top: 3px; font-size: 12px; color: var(--muted); }
+
+.popover { position: fixed; z-index: 10; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow); padding: 6px; display: grid; gap: 2px; min-width: 150px; }
+.popover small { color: var(--muted); padding: 2px 6px 4px; }
+.popover button { text-align: left; border: 0; background: none; padding: 5px 8px; border-radius: 6px; }
+.popover button:hover { background: var(--surface-2); }
+
+table.data { border-collapse: collapse; width: 100%; font-size: 14px; }
+table.data th, table.data td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+table.data th { color: var(--muted); font-weight: 550; font-size: 12.5px; }
+table.data tr.clickable { cursor: pointer; }
+table.data tr.clickable:hover td { background: var(--surface-2); }
+h3 { font-size: 13px; color: var(--muted); font-weight: 600; margin: 4px 0 8px; }
+.table-wrap { overflow-x: auto; margin-bottom: 20px; border: 1px solid var(--line); border-radius: 8px; }
+.table-wrap table.data tr:last-child td { border-bottom: 0; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
+.chip { border: 1px solid var(--line); background: var(--surface-2); border-radius: 999px; padding: 3px 10px; font-size: 13.5px; cursor: pointer; }
+pre.json { margin: 0; font: 12px/1.5 var(--mono); white-space: pre-wrap; word-break: break-all; }
+textarea.vocab { width: 100%; min-height: 300px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); font: 13px/1.5 var(--mono); resize: vertical; }
+.hint { color: var(--muted); font-size: 13px; margin: 0 0 10px; }
+.menu { position: relative; }
+.menu-list { position: absolute; right: 0; top: calc(100% + 4px); z-index: 5; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow); padding: 4px; display: none; min-width: 170px; }
+.menu-list.open { display: grid; }
+.menu-list button { text-align: left; border: 0; background: none; padding: 6px 10px; border-radius: 6px; }
+.menu-list button:hover { background: var(--surface-2); }
+.error-box { margin: 12px; padding: 10px 12px; border-radius: 8px; background: var(--warn-soft); color: var(--warn); }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <svg width="26" height="26" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="var(--hw)"/><path d="M7 20c3-9 6-9 6-3s3 6 5-1 4-6 4 0 2 4 3 2" stroke="#fff" stroke-width="2.6" fill="none" stroke-linecap="round"/></svg>
+    Scrawl <small>handwriting &amp; document OCR · runs on this computer</small>
+  </div>
+  <div id="status" class="pill loading">Loading models…</div>
+</header>
+
+<main>
+  <section class="card">
+    <div class="toolbar">
+      <div class="seg" role="radiogroup" aria-label="Reading mode" id="mode">
+        <button role="radio" aria-checked="true" data-mode="auto" title="Decide per line: printed model for typed text, SimpleHTR for handwriting">Auto</button>
+        <button role="radio" aria-checked="false" data-mode="handwriting" title="Read everything as handwriting">Handwriting</button>
+        <button role="radio" aria-checked="false" data-mode="printed" title="Read everything as printed text">Printed</button>
+      </div>
+      <label class="ctl" title="How strongly unclear handwritten words are pulled towards dictionary words (0 = off)">Dictionary
+        <input type="range" id="lex" min="0" max="6" step="0.5" value="3"><output id="lexOut">3</output></label>
+      <div class="seg" role="radiogroup" aria-label="Handwriting reader" id="reader">
+        <button role="radio" aria-checked="true" data-model="trocr" title="TrOCR: best for messy handwriting, about 3 s per handwritten line">Accurate</button>
+        <button role="radio" aria-checked="false" data-model="simplehtr" title="SimpleHTR: about 10x faster, weaker on messy handwriting">Fast</button>
+      </div>
+      <span class="spacer"></span>
+      <button class="btn" id="pick">Open file…</button>
+      <button class="btn primary" id="rerun" disabled>Read again</button>
+      <input type="file" id="file" hidden accept="image/*,.pdf,.tif,.tiff">
+    </div>
+    <div id="viewer">
+      <div class="empty" id="empty">
+        <strong>Drop a scan, photo or PDF here</strong>
+        <span>Messy handwriting, forms, tables, typed letters</span>
+        <span style="font-size:12.5px">Nothing is uploaded anywhere: it is read on this machine.</span>
+        <button class="btn" onclick="document.getElementById('file').click()">Choose a file</button>
+        <span style="font-size:12.5px;margin-top:6px">or try a sample:
+          <a href="#" data-sample="sample_2.png">handwritten page</a> ·
+          <a href="#" data-sample="form_mixed.png">form with handwriting</a></span>
+      </div>
+      <svg id="page" hidden></svg>
+      <div class="busy" id="busy"><div class="spinner"></div><span id="busyText">Reading…</span></div>
+    </div>
+    <div class="pager" id="pager" hidden>
+      <span class="legend"><span><i style="background:var(--hw)"></i>Handwriting</span><span><i style="background:var(--pr)"></i>Printed</span></span>
+      <span class="spacer"></span>
+      <button class="btn" id="prev">‹</button><span id="pageLabel"></span><button class="btn" id="next">›</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <nav class="tabs" role="tablist">
+      <button role="tab" data-tab="text" aria-selected="true">Text</button>
+      <button role="tab" data-tab="lines" aria-selected="false">Lines<span class="count" id="nLines"></span></button>
+      <button role="tab" data-tab="fields" aria-selected="false">Fields<span class="count" id="nFields"></span></button>
+      <button role="tab" data-tab="tables" aria-selected="false">Tables<span class="count" id="nTables"></span></button>
+      <button role="tab" data-tab="values" aria-selected="false">Values<span class="count" id="nValues"></span></button>
+      <button role="tab" data-tab="json" aria-selected="false">JSON</button>
+      <button role="tab" data-tab="vocab" aria-selected="false">Vocabulary</button>
+    </nav>
+    <div class="actions">
+      <span id="meta">No document yet</span>
+      <span class="spacer"></span>
+      <button class="btn" id="copy" disabled>Copy text</button>
+      <div class="menu">
+        <button class="btn" id="dl" disabled>Download ▾</button>
+        <div class="menu-list" id="dlMenu">
+          <button data-fmt="html">Formatted document (.html)</button>
+          <button data-fmt="txt">Formatted text (.txt)</button>
+          <button data-fmt="md">Markdown (.md)</button>
+          <button data-fmt="csv">Lines as CSV (.csv)</button>
+          <button data-fmt="json">Everything (.json)</button>
+        </div>
+      </div>
+    </div>
+    <div class="panel" data-panel="text">
+      <div class="seg view-toggle" id="textView" hidden>
+        <button role="radio" aria-checked="true" data-view="formatted">Formatted</button>
+        <button role="radio" aria-checked="false" data-view="plain">Plain text</button>
+      </div>
+      <div class="doc" id="doc"><span class="placeholder">The recognised text appears here, laid out like the document: headings, fields, tables and paragraphs. Click any part to find it on the page.</span></div>
+      <pre class="text" id="text" hidden></pre>
+    </div>
+    <div class="panel" data-panel="lines" hidden>
+      <p class="hint">Dotted words were hard to read: click one to pick an alternative. Use ✎ to correct a line; fields and tables update automatically.</p>
+      <ol class="lines" id="lines"></ol>
+    </div>
+    <div class="panel" data-panel="fields" hidden><div id="fields"></div></div>
+    <div class="panel" data-panel="tables" hidden><div id="tables"></div></div>
+    <div class="panel" data-panel="values" hidden><div id="values"></div></div>
+    <div class="panel" data-panel="json" hidden><pre class="json" id="json"></pre></div>
+    <div class="panel" data-panel="vocab" hidden>
+      <p class="hint">A built-in clinical vocabulary (about 800 diagnoses, drugs, abbreviations and form terms, in <code>vocab/medical_terms.txt</code>) already steers both handwriting readers. Add your own here, one per line: doctors' and patients' names, facilities, local brand names, jargon. Unclear handwriting is pulled towards these words when the image supports it. Saved to <code>vocab/custom_words.txt</code>.</p>
+      <textarea class="vocab" id="vocab" spellcheck="false"></textarea>
+      <div style="display:flex;gap:10px;align-items:center;margin-top:10px">
+        <button class="btn primary" id="saveVocab">Save &amp; reload</button><span class="hint" id="vocabMsg" style="margin:0"></span>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+const $ = (s, root = document) => root.querySelector(s);
+const $$ = (s, root = document) => [...root.querySelectorAll(s)];
+const UNSURE = 0.75;
+let result = null, pageIdx = 0, currentFile = null;
+
+function el(tag, attrs = {}, ...children) {
+  const node = tag === 'svg' || ['rect', 'image', 'g'].includes(tag)
+    ? document.createElementNS('http://www.w3.org/2000/svg', tag) : document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k.startsWith('on')) node.addEventListener(k.slice(2), v);
+    else if (v !== null && v !== undefined && v !== false) node.setAttribute(k, v === true ? '' : v);
+  }
+  for (const c of children.flat()) if (c !== null && c !== undefined) node.append(c);
+  return node;
+}
+
+/* ---------- status ---------- */
+async function pollStatus() {
+  try {
+    const s = await (await fetch('/api/status')).json();
+    if (s.error) return setStatus('error', 'Model error: ' + s.error);
+    if (s.ready) {
+      if (!s.trocr) { const b = $('#reader [data-model="trocr"]'); b.disabled = true; b.title = 'TrOCR is not installed (run ./setup.sh)'; $('#reader [data-model="simplehtr"]').click(); }
+      const hw = s.hardware || {};
+      const where = (hw.trocr || hw.simplehtr || '').replace(/ \((NVIDIA CUDA|AMD ROCm|Intel XPU)\)$/, '');
+      setStatus('ready', `Ready · handwriting on ${where} · ${s.vocabulary_words.toLocaleString()} words`);
+      $('#status').title = `Text detection & printed text: ${hw.detection_and_printed}\nTrOCR: ${hw.trocr || 'not installed'}\nSimpleHTR: ${hw.simplehtr}\nCPU threads: ${hw.cpu_threads}`;
+      return;
+    }
+    setStatus('loading', 'Loading models…');
+  } catch { setStatus('error', 'Server not reachable'); }
+  setTimeout(pollStatus, 1500);
+}
+function setStatus(kind, text) { const p = $('#status'); p.className = 'pill ' + kind; p.textContent = text; }
+
+/* ---------- options ---------- */
+$('#mode').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  $$('#mode button').forEach(x => x.setAttribute('aria-checked', x === b));
+});
+$('#reader').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  $$('#reader button').forEach(x => x.setAttribute('aria-checked', x === b));
+});
+$('#lex').addEventListener('input', e => $('#lexOut').textContent = e.target.value);
+const mode = () => $('#mode [aria-checked="true"]').dataset.mode;
+
+/* ---------- file input ---------- */
+$('#pick').onclick = () => $('#file').click();
+$('#file').onchange = e => e.target.files[0] && read(e.target.files[0]);
+$('#rerun').onclick = () => currentFile && read(currentFile);
+const viewer = $('#viewer');
+viewer.addEventListener('dragover', e => { e.preventDefault(); viewer.classList.add('dragover'); });
+viewer.addEventListener('dragleave', () => viewer.classList.remove('dragover'));
+viewer.addEventListener('drop', e => {
+  e.preventDefault(); viewer.classList.remove('dragover');
+  if (e.dataTransfer.files[0]) read(e.dataTransfer.files[0]);
+});
+document.addEventListener('paste', e => {
+  const f = [...(e.clipboardData?.files || [])].find(f => f.type.startsWith('image/'));
+  if (f) read(f);
+});
+
+$('#empty').addEventListener('click', async e => {
+  const name = e.target.dataset?.sample; if (!name) return;
+  e.preventDefault();
+  const blob = await (await fetch('/samples/' + name)).blob();
+  read(new File([blob], name, { type: blob.type }));
+});
+
+async function read(file) {
+  currentFile = file;
+  $('#rerun').disabled = false;
+  const fd = new FormData();
+  fd.append('file', file);
+  fd.append('mode', mode());
+  fd.append('handwriting_model', $('#reader [aria-checked="true"]').dataset.model);
+  fd.append('lexicon_strength', $('#lex').value);
+  busy(true, `Reading ${file.name}…` + ($('#reader [aria-checked="true"]').dataset.model === 'trocr'
+    ? ' (accurate mode: about a minute per handwritten page)' : ''));
+  $$('.error-box').forEach(n => n.remove());
+  try {
+    const r = await fetch('/api/ocr', { method: 'POST', body: fd });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || r.statusText);
+    result = j; pageIdx = 0; render();
+  } catch (err) {
+    viewer.prepend(el('div', { class: 'error-box' }, 'Could not read this file: ' + err.message));
+  } finally { busy(false); }
+}
+function busy(on, text) { $('#busy').classList.toggle('on', on); if (text) $('#busyText').textContent = text; }
+
+/* ---------- rendering ---------- */
+const page = () => result.pages[pageIdx];
+const pct = c => Math.round(c * 100);
+const confColor = c => c >= 0.85 ? 'var(--ok)' : c >= 0.6 ? 'var(--warn)' : '#e03131';
+
+function render() {
+  const p = page();
+  $('#empty').hidden = true;
+  $('#copy').disabled = $('#dl').disabled = false;
+  const nPages = result.pages.length;
+  $('#pager').hidden = false;
+  $('#pageLabel').textContent = `Page ${pageIdx + 1} of ${nPages}`;
+  $('#prev').disabled = pageIdx === 0; $('#next').disabled = pageIdx === nPages - 1;
+  $('#prev').style.display = $('#next').style.display = $('#pageLabel').style.display = nPages > 1 ? '' : 'none';
+  const hw = p.lines.filter(l => l.engine === 'handwriting').length;
+  $('#meta').textContent = `${result.source || 'document'} · ${p.lines.length} lines (${hw} handwritten) · ${result.seconds}s` +
+    (p.deskew_degrees ? ` · straightened ${p.deskew_degrees}°` : '');
+  renderPage(p); renderText(p); renderLines(p); renderFields(p); renderTables(p); renderValues(p);
+  $('#json').textContent = JSON.stringify(stripImages(result), null, 2);
+}
+
+function renderPage(p) {
+  const svg = $('#page');
+  svg.removeAttribute('hidden');  // SVG elements have no .hidden property
+  svg.setAttribute('viewBox', `0 0 ${p.width} ${p.height}`);
+  svg.replaceChildren(el('image', { href: p.image, x: 0, y: 0, width: p.width, height: p.height }),
+    ...p.lines.map(l => {
+      const [x0, y0, x1, y1] = l.bbox;
+      return el('rect', {
+        x: x0, y: y0, width: x1 - x0, height: y1 - y0, rx: 4, 'data-id': l.id,
+        class: `${l.engine}${l.confidence < 0.6 ? ' low' : ''}`,
+        onmouseenter: () => hot(l.id, true), onmouseleave: () => hot(l.id, false),
+        onclick: () => { showTab('lines'); $(`.line[data-id="${l.id}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }); },
+      }, el('title', {}, `${l.engine} · ${pct(l.confidence)}% · ${l.text}`));
+    }));
+}
+
+function hot(id, on) {
+  $$(`#page rect[data-id="${id}"], .line[data-id="${id}"]`).forEach(n => n.classList.toggle('hot', on));
+}
+
+function renderText(p) {
+  $('#textView').hidden = false;
+  $('#text').textContent = p.formatted_text || p.text || '(no text found)';
+  const span = item => {
+    const low = item.confidence < 0.6;
+    return el('span', { class: [item.handwritten ? 'hand' : '', low ? 'low' : ''].join(' ').trim(),
+      title: low ? `read with ${pct(item.confidence)}% confidence - please check` : null }, item.text);
+  };
+  const clickable = (node, ids) => {
+    node.dataset.ids = ids.join(',');
+    node.addEventListener('click', () => flash(ids));
+    return node;
+  };
+  const blocks = (p.document || []).map(b => {
+    if (b.type === 'heading') return clickable(el(b.level === 1 ? 'h2' : 'h3', {}, b.text), b.line_ids);
+    if (b.type === 'paragraph') return clickable(el('p', { class: b.lines > 1 ? 'para' : '' }, span(b)), b.line_ids);
+    if (b.type === 'row') return el('div', { class: 'row' }, ...b.items.map(i =>
+      clickable(el('div', {}, i.label ? el('span', { class: 'label' }, i.label + ': ') : null, span(i)), i.line_ids)));
+    if (b.type === 'table') {
+      const [head, ...body] = b.rows;
+      return clickable(el('div', { class: 'table-wrap' }, el('table', { class: 'data' },
+        el('thead', {}, el('tr', {}, ...head.map(c => el('th', {}, c)))),
+        el('tbody', {}, ...body.map(r => el('tr', {}, ...r.map(c => el('td', {}, c))))))), b.line_ids);
+    }
+    return null;
+  });
+  $('#doc').replaceChildren(...(blocks.length ? blocks : [el('span', { class: 'placeholder' }, '(no text found)')]));
+}
+$('#textView').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  $$('#textView button').forEach(x => x.setAttribute('aria-checked', x === b));
+  $('#doc').hidden = b.dataset.view !== 'formatted';
+  $('#text').hidden = b.dataset.view !== 'plain';
+});
+
+function renderLines(p) {
+  $('#nLines').textContent = p.lines.length;
+  $('#lines').replaceChildren(...p.lines.map(line => {
+    const text = el('div', { class: 'line-text' }, lineContent(line));
+    return el('li', {
+      class: `line ${line.engine}`, 'data-id': line.id,
+      onmouseenter: () => hot(line.id, true), onmouseleave: () => hot(line.id, false),
+    },
+      el('div', { class: 'line-head' },
+        el('span', { class: 'num' }, line.id + 1),
+        el('span', { class: `badge ${line.engine}` }, line.engine === 'handwriting' ? 'Handwriting' : 'Printed'),
+        el('span', {}, { trocr: 'TrOCR', 'trocr+simplehtr': 'TrOCR + SimpleHTR agree', simplehtr: 'SimpleHTR', 'printed-ocr': 'printed model' }[line.reader] || ''),
+        el('span', { class: 'meter', title: `confidence ${pct(line.confidence)}%` },
+          el('i', { style: `width:${pct(line.confidence)}%;background:${confColor(line.confidence)}` })),
+        el('span', {}, `${pct(line.confidence)}%`),
+        line.edited ? el('span', { class: 'edited' }, 'edited') : null,
+        el('button', { class: 'edit', title: 'Correct this line', onclick: () => editLine(line, text) }, '✎')),
+      text,
+      ...[['Before vocabulary', line.trocr_reading], ['Printed model', line.printed_reading], ['SimpleHTR', line.simplehtr_reading]]
+        .filter(([, t]) => t && t !== line.text)
+        .map(([who, t]) => el('div', { class: 'also' }, `${who} read: `, el('q', {}, t))));
+  }));
+}
+
+function lineContent(line) {
+  if (!line.words?.length || line.edited) return [line.text];
+  const out = [];
+  line.words.forEach((w, i) => {
+    if (i) out.push(' ');
+    const options = [...new Set([...(w.alternatives || []), w.read_as].filter(o => o && o !== w.text))];
+    const unsure = w.confidence !== null && w.confidence < UNSURE && options.length;
+    out.push(unsure
+      ? el('span', { class: 'word unsure', title: `${pct(w.confidence)}% sure`, onclick: e => pickWord(e, line, i, options) }, w.text)
+      : el('span', { class: 'word' }, w.text));
+  });
+  return out;
+}
+
+function pickWord(event, line, index, options) {
+  event.stopPropagation();
+  closePopover();
+  const r = event.target.getBoundingClientRect();
+  const pop = el('div', { class: 'popover', id: 'popover', style: `left:${Math.min(r.left, innerWidth - 200)}px;top:${r.bottom + 6}px` },
+    el('small', {}, 'Could also be'),
+    ...options.map(o => el('button', { onclick: () => {
+      line.words[index] = { ...line.words[index], text: o, confidence: 1, alternatives: [] };
+      line.text = line.words.map(w => w.text).join(' ');
+      closePopover(); restructure();
+    } }, o)),
+    el('button', { onclick: () => { closePopover(); editLine(line, $(`.line[data-id="${line.id}"] .line-text`)); } }, '✎ Type it myself…'));
+  document.body.append(pop);
+}
+function closePopover() { $('#popover')?.remove(); }
+document.addEventListener('click', e => { if (!e.target.closest('#popover')) closePopover(); if (!e.target.closest('.menu')) $('#dlMenu').classList.remove('open'); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') { closePopover(); $('#dlMenu').classList.remove('open'); } });
+
+function editLine(line, container) {
+  const input = el('input', { value: line.text, 'aria-label': 'Corrected text' });
+  container.replaceChildren(input);
+  input.focus(); input.select();
+  let done = false;
+  const commit = save => {
+    if (done) return; done = true;
+    if (save && input.value.trim() !== line.text) {
+      line.text = input.value.trim(); line.edited = true; line.confidence = 1;
+      line.words = line.text.split(/\s+/).map(t => ({ text: t, confidence: null, alternatives: [] }));
+      restructure();
+    } else container.replaceChildren(...lineContent(line));
+  };
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') commit(true); if (e.key === 'Escape') commit(false); });
+  input.addEventListener('blur', () => commit(true));
+}
+
+async function restructure() {
+  const p = page();
+  const r = await fetch('/api/restructure', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lines: p.lines }) });
+  Object.assign(p, await r.json());
+  const scroll = $('[data-panel="lines"]').scrollTop;
+  render();
+  $('[data-panel="lines"]').scrollTop = scroll;
+}
+
+function flash(ids) {
+  ids.forEach(id => hot(id, true));
+  setTimeout(() => ids.forEach(id => hot(id, false)), 1400);
+  $(`#page rect[data-id="${ids[0]}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+}
+
+function renderFields(p) {
+  $('#nFields').textContent = p.fields.length || '';
+  $('#fields').replaceChildren(p.fields.length
+    ? el('table', { class: 'data' },
+        el('thead', {}, el('tr', {}, el('th', {}, 'Field'), el('th', {}, 'Value'))),
+        el('tbody', {}, ...p.fields.map(f => el('tr', { class: 'clickable', onclick: () => flash(f.line_ids) },
+          el('td', {}, f.label), el('td', {}, f.value)))))
+    : el('p', { class: 'placeholder' }, 'No "Label: value" fields found on this page.'));
+}
+
+function renderTables(p) {
+  $('#nTables').textContent = p.tables.length || '';
+  $('#tables').replaceChildren(...(p.tables.length ? p.tables.map((t, n) => [
+    el('h3', {}, `Table ${n + 1} · ${t.rows.length} rows × ${t.columns} columns`),
+    el('div', { class: 'table-wrap' }, el('table', { class: 'data' },
+      el('thead', {}, el('tr', {}, ...t.rows[0].map(c => el('th', {}, c)))),
+      el('tbody', {}, ...t.rows.slice(1).map(r => el('tr', {}, ...r.map(c => el('td', {}, c))))))),
+  ]).flat() : [el('p', { class: 'placeholder' }, 'No tables found on this page.')]));
+}
+
+function renderValues(p) {
+  $('#nValues').textContent = p.entities.length || '';
+  if (!p.entities.length) return $('#values').replaceChildren(el('p', { class: 'placeholder' }, 'No dates, amounts, doses, phone numbers or emails found.'));
+  const groups = {};
+  p.entities.forEach(e => (groups[e.type] ||= []).push(e));
+  $('#values').replaceChildren(...Object.entries(groups).map(([type, items]) => [
+    el('h3', {}, type.replace('_', ' ').replace(/^./, c => c.toUpperCase())),
+    el('div', { class: 'chips' }, ...items.map(e => el('button', { class: 'chip', onclick: () => flash([e.line_id]) }, e.text))),
+  ]).flat());
+}
+
+/* ---------- tabs, pages, export ---------- */
+function showTab(name) {
+  $$('.tabs button').forEach(b => b.setAttribute('aria-selected', b.dataset.tab === name));
+  $$('.panel').forEach(p => p.hidden = p.dataset.panel !== name);
+  if (name === 'vocab' && !$('#vocab').dataset.loaded) loadVocab();
+}
+$('.tabs').addEventListener('click', e => { const b = e.target.closest('button'); if (b) showTab(b.dataset.tab); });
+$('#prev').onclick = () => { pageIdx--; render(); };
+$('#next').onclick = () => { pageIdx++; render(); };
+
+function stripImages(r) { return { ...r, pages: r.pages.map(({ image, ...rest }) => rest) }; }
+
+$('#copy').onclick = async () => {
+  await navigator.clipboard.writeText(page().formatted_text || page().text);
+  $('#copy').textContent = 'Copied'; setTimeout(() => $('#copy').textContent = 'Copy text', 1200);
+};
+$('#dl').onclick = () => $('#dlMenu').classList.toggle('open');
+$('#dlMenu').addEventListener('click', async e => {
+  const fmt = e.target.closest('button')?.dataset.fmt; if (!fmt) return;
+  $('#dlMenu').classList.remove('open');
+  const r = await fetch(`/api/export/${fmt}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(stripImages(result)) });
+  const url = URL.createObjectURL(await r.blob());
+  const base = (result.source || 'scan').replace(/\.[^.]+$/, '');
+  el('a', { href: url, download: `${base}.${fmt}` }).click();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+});
+
+/* ---------- vocabulary ---------- */
+async function loadVocab() {
+  $('#vocab').value = await (await fetch('/api/vocabulary')).text();
+  $('#vocab').dataset.loaded = '1';
+}
+$('#saveVocab').onclick = async () => {
+  $('#vocabMsg').textContent = 'Saving…';
+  const r = await fetch('/api/vocabulary', { method: 'PUT', body: $('#vocab').value });
+  const j = await r.json();
+  $('#vocabMsg').textContent = `Saved · ${j.vocabulary_words.toLocaleString()} words in the dictionary. Read the page again to use it.`;
+  setStatus('ready', `Ready · ${j.vocabulary_words.toLocaleString()} dictionary words`);
+};
+
+pollStatus();
+</script>
+</body>
+</html>
