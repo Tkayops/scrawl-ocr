@@ -9,6 +9,7 @@ web UI loads nothing from the internet.
 |---|---|
 | Handwriting, **Accurate** (default) | Microsoft [TrOCR](https://huggingface.co/microsoft/trocr-base-handwritten) base-handwritten (PyTorch, CPU), cross-checked with SimpleHTR |
 | Handwriting, **Fast** | [SimpleHTR](https://github.com/githubharald/SimpleHTR) line model (TensorFlow, IAM-trained), plus the accuracy boosters below |
+| Reconstructing unclear words (Accurate mode) | [Bio_ClinicalBERT](https://huggingface.co/emilyalsentzer/Bio_ClinicalBERT), a clinical language model, together with TrOCR |
 | Printed text and text detection | RapidOCR (PaddleOCR PP-OCRv4 via ONNX Runtime, models bundled in the pip wheel) |
 | PDFs | pypdfium2 (each page rendered at 200 dpi) |
 
@@ -89,6 +90,7 @@ The main options:
 * `--lexicon-strength 0..6` (default 3)
 * `--printed-threshold` (default 0.9)
 * `--fast`: SimpleHTR instead of TrOCR
+* `--no-context`: skip reconstructing unclear words from the surrounding text
 * `--no-tta`: with `--fast`, faster still
 * `--no-rescue`
 
@@ -145,13 +147,26 @@ page['text'], page['fields'], page['tables'], page['entities'], page['lines']
        plus your vocabulary). Each candidate is scored by how well the network's output supports it. A
        dictionary word wins only when the pixels allow it, so names and numbers that are read clearly are
        left alone.
-5. **Structure:**
+5. **Reconstructing unclear words from context** (Accurate mode):
+   * **Which words:** after the page is read, handwritten words that aren't real words, or that TrOCR was
+     unsure of, get a second look.
+   * **Candidates:** similar dictionary and clinical words, plus words the clinical language model
+     (Bio_ClinicalBERT) expects there. Its context is the field label and the lines around the word.
+   * **Scoring:** each candidate is scored on three things: how well it matches the handwriting (TrOCR),
+     whether it's a known word, and how well it fits the sentence (Bio_ClinicalBERT).
+   * **Safety:**
+     * Names (any field labelled name, doctor, signature…), numbers, dates and short abbreviations are
+       never guessed.
+     * A medicine name that only context favours is shown as a suggestion and not filled in.
+   * **In the Lines tab:** reconstructed words are shown in *wavy italic* with the original reading, and
+     suggestions are dashed.
+6. **Structure:**
    * Rows and reading order.
    * Fields: `Label: value` inline, in the next cell or on the line below, and a printed caption
      followed by handwriting even without a colon.
    * Tables: aligned columns, but not label/answer layouts or question rows.
    * Typed values.
-6. **Formatting** (`scrawl/document.py`): headings (larger or all-capital printed lines), field rows,
+7. **Formatting** (`scrawl/document.py`): headings (larger or all-capital printed lines), field rows,
    paragraphs and tables in reading order. These are rendered as text, Markdown, HTML and in the web UI.
 
 ### Measured accuracy
@@ -167,7 +182,11 @@ truth typed by hand. They are not bundled because they contain patient data.
 | SimpleHTR, first version | 51% | ~10–20 s |
 | Fast: pen layer and better engine choice | 38% | 12–24 s |
 | Accurate: plus TrOCR | 22% | 64–82 s |
-| **Accurate: plus clinical vocabulary steering TrOCR** | **17%** | 79–96 s |
+| Accurate: plus clinical vocabulary steering TrOCR | 17.2% | 79–96 s |
+| **Accurate: plus context reconstruction (Bio_ClinicalBERT)** | **15.9%** | about the same; page 3 measured 92 s with it, 115 s without (run-to-run noise) |
+
+The context step's one change on this PDF was "pentment" → "patient". It made no change on the sample
+pages (2.3% either way).
 
 **Bundled handwritten sample pages** (`tests/eval_samples.py`). These are clean, IAM-style writing:
 
@@ -227,6 +246,8 @@ SimpleHTR can be fine-tuned. Collect line images with their transcriptions in IA
   by `tests/make_test_form.py` from them.
 * [TrOCR](https://huggingface.co/microsoft/trocr-base-handwritten) by Microsoft (MIT), downloaded by
   `setup.sh`.
+* [Bio_ClinicalBERT](https://huggingface.co/emilyalsentzer/Bio_ClinicalBERT) by Alsentzer et al. (MIT),
+  trained on MIMIC-III clinical notes, downloaded by `setup.sh`.
 * [RapidOCR](https://github.com/RapidAI/RapidOCR) (Apache-2.0) with PaddleOCR PP-OCRv4 models
   (Apache-2.0).
 * The handwriting models were trained on the IAM Handwriting Database, which has its own terms for
@@ -238,10 +259,11 @@ SimpleHTR can be fine-tuned. Collect line images with their transcriptions in IA
 ocr.py               command line
 server.py, web/      local web UI (127.0.0.1 only)
 scrawl/              pipeline: hardware (GPU / threads), imaging (incl. pen layer), layout, htr (SimpleHTR),
-                     trocr, ctc, lexicon, printed, structure, document (formatting), export
+                     trocr, context (clinical language model), ctc, lexicon, printed, structure,
+                     document (formatting), export
 vocab/               your custom words
 vendor/SimpleHTR/    upstream SimpleHTR code (unchanged)
 models/line/         SimpleHTR pretrained line model
-models/hf/           TrOCR model (downloaded once by setup.sh, then used offline)
+models/hf/           TrOCR and Bio_ClinicalBERT (downloaded once by setup.sh, then used offline)
 samples/, tests/     sample pages, test-form generator and accuracy check
 ```

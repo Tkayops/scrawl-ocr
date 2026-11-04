@@ -10,10 +10,13 @@ from typing import List, Optional
 import cv2
 import numpy as np
 
+from rapidfuzz import fuzz
+
+from . import context as clinical_context
 from . import hardware, imaging, layout, structure, trocr
-from .htr import HandwritingReader
+from .htr import HandwritingReader, tidy_punctuation
 from .layout import Region
-from .lexicon import default_lexicon
+from .lexicon import WORD_RE, default_lexicon
 from .paths import CUSTOM_VOCAB, MEDICAL_VOCAB, MODELS_DIR, SIMPLEHTR_DIR
 from .printed import PrintedReader
 
@@ -21,6 +24,8 @@ LABEL_VALUE_RE = re.compile(r'^([^:]{1,40}:)\s*(\S.*)$')
 SURE_PRINTED = 0.98  # printed-model confidence above which a box is never reassigned to handwriting
 MIN_PEN_FRACTION = 0.0005  # share of coloured-ink pixels from which a page gets a separate pen layer
 MAX_LINE_TILT = 12  # degrees; steeper text in the pen layer is a stamp, not handwriting
+CONTEXT_SURE = 0.5  # known words read at least this confidently are not reconsidered from context (speed)
+NAME_FIELD = re.compile(r'name|surname|signature|signed|doctor|\bdr\b|nurse|clinician|prepared by', re.I)
 
 
 @dataclass
@@ -33,6 +38,8 @@ class Options:
     rescue: bool = True              # look for handwriting the detector missed
     pen_layer: bool = True           # read coloured ink (blue/red pen) separately from the black print
     handwriting_model: str = 'trocr'  # trocr (accurate, ~3 s/line) | simplehtr (fast); trocr needs its model
+    context: bool = True             # accurate mode: reconsider unclear words using the sentence around them
+    context_weight: float = 0.5      # how much the clinical language model's opinion counts
     deskew: bool = True
     include_image: bool = False      # embed the (deskewed) page as a JPEG data URL, for the web UI
 
@@ -45,6 +52,15 @@ class Scrawl:
         self.htr = HandwritingReader(models_dir, default_lexicon(SIMPLEHTR_DIR, [MEDICAL_VOCAB, custom_vocab]))
         self._trocr = None
         self._trocr_lock = threading.Lock()
+        self._context = None
+        self._context_lock = threading.Lock()
+
+    def context(self):
+        """The clinical language model, loaded on first use; None if it is not installed."""
+        with self._context_lock:
+            if self._context is None and clinical_context.available():
+                self._context = clinical_context.ContextModel()
+        return self._context
 
     def trocr(self):
         """The TrOCR reader, loaded on first use; None if it is not installed."""
@@ -57,7 +73,8 @@ class Scrawl:
         """Where each engine runs, e.g. for the web UI's status line."""
         return {'cpu_threads': hardware.CPU_THREADS, 'detection_and_printed': self.printed.device,
                 'simplehtr': self.htr.device_name,
-                'trocr': self._trocr.device_name if self._trocr is not None else None}
+                'trocr': self._trocr.device_name if self._trocr is not None else None,
+                'context_model': hardware.torch_device_name(self._context.device) if self._context is not None else None}
 
     def reload_vocabulary(self) -> int:
         self.htr.lexicon = default_lexicon(SIMPLEHTR_DIR, [MEDICAL_VOCAB, self.custom_vocab])
@@ -106,8 +123,16 @@ class Scrawl:
                 line['engine'] = 'handwriting'
                 lines.append(line)
 
+        built = structure.build(lines)
+        changes = 0
+        if options.context and options.handwriting_model == 'trocr' and self.context() is not None:
+            changes = self._reconstruct(built, options)
+            if changes:
+                built = structure.build(built['lines'])  # fields, tables and formatting see the new words
+        for line in built['lines']:
+            line.pop('_scorer', None)
         page = {'width': width, 'height': height, 'deskew_degrees': round(angle, 2),
-                'pen_layer': pen is not None, **structure.build(lines)}
+                'pen_layer': pen is not None, 'context_changes': changes, **built}
         if options.include_image:
             page['image'] = _jpeg_data_url(bgr)
         return page
@@ -158,6 +183,7 @@ class Scrawl:
                 else:
                     line.update(text=deep['text'], confidence=deep['confidence'], reader='trocr',
                                 simplehtr_reading=line['text'] or None, words=deep['words'])
+                line['_scorer'] = deep['_scorer']
                 if deep['raw_text'] != deep['text']:
                     line['trocr_reading'] = deep['raw_text']  # before vocabulary correction
             elif mode == 'auto' and _printed_reading_wins(r.printed_text, r.printed_score, line['confidence'], pen):
@@ -169,6 +195,72 @@ class Scrawl:
                 line['engine'] = 'printed'
             lines.append(line)
         return lines
+
+    def _reconstruct(self, built: dict, options: Options) -> int:
+        """Second look at handwritten words the reader was unsure of, using the text around them.
+
+        Candidates: similar dictionary / clinical words plus words the clinical language model expects in the
+        gap. Each is scored by TrOCR (does it match the handwriting?), the dictionary bonus and the language
+        model (does it fit the sentence?). Names are never guessed, and a drug name that only context favours
+        is offered as a suggestion instead of being filled in."""
+        model, lexicon = self.context(), self.htr.lexicon
+        lines, rows = built['lines'], built['rows']
+        by_id = {line['id']: line for line in lines}
+        row_of = {i: r for r, row in enumerate(rows) for i in row}
+
+        def row_text(r: int) -> str:
+            return ' '.join(by_id[i]['text'] for i in rows[r]) if 0 <= r < len(rows) else ''
+
+        total = 0
+        for line in lines:
+            scorer, words = line.get('_scorer'), line.get('words')
+            if scorer is None or not words:
+                continue
+            r = row_of[line['id']]
+            k = rows[r].index(line['id'])
+            before = [by_id[i]['text'] for i in rows[r][:k]]
+            after = [by_id[i]['text'] for i in rows[r][k + 1:]]
+            if any(NAME_FIELD.search(t) for t in before):
+                continue  # names are never guessed
+            texts, changed = [w['text'] for w in words], 0
+            for wi, word in enumerate(words):
+                match = WORD_RE.search(word['text'])
+                if not match or len(match.group()) < 3 or re.search(r'\d', word['text']):
+                    continue
+                core, pre, post = match.group(), word['text'][:match.start()], word['text'][match.end():]
+                if (core.isupper() and len(core) <= 4) or \
+                        (core in lexicon and (word.get('confidence') is None or word['confidence'] >= CONTEXT_SURE)):
+                    continue
+                left = ' '.join([row_text(r - 1), *before, *texts[:wi]])
+                right = ' '.join([*texts[wi + 1:], *after, row_text(r + 1)])
+                options_ = [core] + [lexicon._matching_case(c, core) for c in lexicon.candidates(core, 6, common_only=True)]
+                options_ += [lexicon._matching_case(p.lower(), core) for p in model.propose(left, right)
+                             if fuzz.ratio(p.lower(), core.lower()) >= 50][:3]
+                options_ = list(dict.fromkeys(options_))
+                if len(options_) == 1:
+                    continue
+                variants = [' '.join(texts[:wi] + [pre + o + post] + texts[wi + 1:]) for o in options_]
+                base = scorer(variants) + np.array([lexicon.bonus(o, options.lexicon_strength) for o in options_])
+                top = sorted(set(np.argsort(-base)[:6].tolist()) | {0})
+                fit = model.score(left, right, [options_[j] for j in top])
+                best = top[int(np.argmax(base[top] + options.context_weight * fit))]
+                if best == 0:
+                    continue
+                choice, original = pre + options_[best] + post, word['text']
+                by_context = best != int(np.argmax(base))
+                if by_context and options_[best].lower() in lexicon.drugs:
+                    word['suggestion'] = choice  # a medicine guessed from context: shown, never filled in
+                    word['alternatives'] = [choice] + [a for a in word.get('alternatives', []) if a != choice][:2]
+                    continue
+                word.update(text=choice, read_as=word.get('read_as') or original, inferred=by_context,
+                            alternatives=[original] + [a for a in word.get('alternatives', []) if a not in (choice, original)][:2])
+                texts[wi] = choice
+                changed += 1
+            if changed:
+                line['text'] = tidy_punctuation(' '.join(texts))
+                line['context_changes'] = changed
+                total += changed
+        return total
 
     def _read_printed(self, clean: np.ndarray, regions: List[Region]) -> None:
         crops = [cv2.cvtColor(clean[r.y0:r.y1, r.x0:r.x1], cv2.COLOR_GRAY2BGR) for r in regions]

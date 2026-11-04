@@ -106,7 +106,8 @@ class TrOCRReader:
                 raw, lambda lines: self._score(lines, features), charset=None, strength=strength,
                 max_candidates=8, word_probs=self._word_probs(ids, token_logp), sure=SURE_WORD, match_case=True)
         return {'text': tidy_punctuation(text), 'raw_text': tidy_punctuation(raw),
-                'confidence': round(confidence, 3), 'words': _attach(words)}
+                'confidence': round(confidence, 3), 'words': _attach(words),
+                '_scorer': lambda lines: self._score(lines, features)}  # for the page-level context pass
 
     def _word_probs(self, ids, token_logp) -> List[float]:
         """Probability of each whitespace-separated word = product of its tokens' probabilities."""

@@ -68,5 +68,10 @@ if [ ! -d "models/hf/models--microsoft--trocr-base-handwritten" ]; then
   .venv/bin/python -c "from transformers import TrOCRProcessor, VisionEncoderDecoderModel as M; n='microsoft/trocr-base-handwritten'; TrOCRProcessor.from_pretrained(n, cache_dir='models/hf'); M.from_pretrained(n, cache_dir='models/hf')"
 fi
 
+if [ ! -d "models/hf/models--emilyalsentzer--Bio_ClinicalBERT" ]; then
+  echo "==> Downloading clinical language model Bio_ClinicalBERT (~440 MB, one time) for reconstructing unclear words"
+  .venv/bin/python -c "from transformers import AutoTokenizer, AutoModelForMaskedLM as M; n='emilyalsentzer/Bio_ClinicalBERT'; AutoTokenizer.from_pretrained(n, cache_dir='models/hf'); M.from_pretrained(n, cache_dir='models/hf')"
+fi
+
 .venv/bin/python -c "import scrawl.hardware as h, torch; d = h.torch_device(); print('==> Handwriting (TrOCR) will run on:', h.torch_device_name(d)); print('==> Text detection will run on:', h.onnx_options()[1])"
 echo "==> Done. Start the web UI with:  .venv/bin/python server.py"

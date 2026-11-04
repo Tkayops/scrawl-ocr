@@ -132,6 +132,8 @@ ol.lines { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .line-text input { width: 100%; padding: 4px 6px; border: 1px solid var(--accent); border-radius: 6px; background: var(--surface); }
 .word.unsure { text-decoration: underline dotted var(--warn) 2px; text-underline-offset: 3px; cursor: pointer; border-radius: 3px; }
 .word.unsure:hover { background: var(--warn-soft); }
+.word.inferred { font-style: italic; text-decoration: underline wavy var(--accent) 1.5px; text-underline-offset: 4px; cursor: pointer; }
+.word.suggested { text-decoration: underline dashed var(--accent) 2px; text-underline-offset: 3px; cursor: pointer; }
 .also { margin-top: 3px; font-size: 12px; color: var(--muted); }
 
 .popover { position: fixed; z-index: 10; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow); padding: 6px; display: grid; gap: 2px; min-width: 150px; }
@@ -242,7 +244,7 @@ textarea.vocab { width: 100%; min-height: 300px; padding: 10px; border: 1px soli
       <pre class="text" id="text" hidden></pre>
     </div>
     <div class="panel" data-panel="lines" hidden>
-      <p class="hint">Dotted words were hard to read: click one to pick an alternative. Use ✎ to correct a line; fields and tables update automatically.</p>
+      <p class="hint">Dotted words were hard to read; <i>wavy italic</i> words were reconstructed from the surrounding text; dashed words have a suggestion that was not filled in (e.g. a medicine name). Click any of them to see the options. Use ✎ to correct a line; fields and tables update automatically.</p>
       <ol class="lines" id="lines"></ol>
     </div>
     <div class="panel" data-panel="fields" hidden><div id="fields"></div></div>
@@ -286,7 +288,7 @@ async function pollStatus() {
       const hw = s.hardware || {};
       const where = (hw.trocr || hw.simplehtr || '').replace(/ \((NVIDIA CUDA|AMD ROCm|Intel XPU)\)$/, '');
       setStatus('ready', `Ready · handwriting on ${where} · ${s.vocabulary_words.toLocaleString()} words`);
-      $('#status').title = `Text detection & printed text: ${hw.detection_and_printed}\nTrOCR: ${hw.trocr || 'not installed'}\nSimpleHTR: ${hw.simplehtr}\nCPU threads: ${hw.cpu_threads}`;
+      $('#status').title = `Text detection & printed text: ${hw.detection_and_printed}\nTrOCR: ${hw.trocr || 'not installed'}\nContext model: ${hw.context_model || 'not installed'}\nSimpleHTR: ${hw.simplehtr}\nCPU threads: ${hw.cpu_threads}`;
       return;
     }
     setStatus('loading', 'Loading models…');
@@ -457,9 +459,13 @@ function lineContent(line) {
   const out = [];
   line.words.forEach((w, i) => {
     if (i) out.push(' ');
-    const options = [...new Set([...(w.alternatives || []), w.read_as].filter(o => o && o !== w.text))];
+    const options = [...new Set([w.suggestion, ...(w.alternatives || []), w.read_as].filter(o => o && o !== w.text))];
     const unsure = w.confidence !== null && w.confidence < UNSURE && options.length;
-    out.push(unsure
+    if (w.inferred) out.push(el('span', { class: 'word inferred', title: `reconstructed from context; the handwriting read as "${w.read_as}"`,
+      onclick: e => pickWord(e, line, i, options) }, w.text));
+    else if (w.suggestion) out.push(el('span', { class: 'word suggested', title: `context suggests "${w.suggestion}" (not filled in: please check)`,
+      onclick: e => pickWord(e, line, i, options) }, w.text));
+    else out.push(unsure
       ? el('span', { class: 'word unsure', title: `${pct(w.confidence)}% sure`, onclick: e => pickWord(e, line, i, options) }, w.text)
       : el('span', { class: 'word' }, w.text));
   });

@@ -28,6 +28,7 @@ def engine():
                 engine_ = Scrawl()
                 engine_.htr._model('line')  # load TensorFlow weights now rather than on the first page
                 engine_.trocr()  # and TrOCR, if installed (slowest to load)
+                engine_.context()  # and the clinical language model, if installed
                 _engine = engine_  # only now does /api/status report ready
             except Exception as exc:  # surfaced by /api/status
                 _engine_error = str(exc)
@@ -66,6 +67,7 @@ def ocr():
                       lexicon_strength=float(form.get('lexicon_strength', 3.0)),
                       printed_threshold=float(form.get('printed_threshold', 0.9)),
                       handwriting_model=form.get('handwriting_model', 'trocr'),
+                      context=form.get('context', 'true') == 'true',
                       include_image=True)
     try:
         return jsonify(engine().read_bytes(upload.read(), upload.filename or '', options))

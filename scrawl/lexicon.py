@@ -38,11 +38,20 @@ class Lexicon:
                 self._add(WORD_RE.findall(f.read()), 1)
         for path in word_list_files:  # one word per line
             self._add((w for w in _read_lines(path) if WORD_RE.fullmatch(w)), 1)
+        self.drugs: set = set()  # medicine names (sections marked [drugs]): never filled in from context alone
         for path in custom_files:  # user vocabulary, may contain phrases
-            for line in _read_lines(path):
-                words = WORD_RE.findall(line)
-                self._add(words, CUSTOM_WORD_COUNT)
-                self.domain.update(w.lower() for w in words if len(w) >= 3)
+            drugs_section = False
+            with open(path, encoding='utf-8', errors='ignore') as f:
+                for line in f:
+                    line = line.strip()
+                    if line.startswith('#'):
+                        drugs_section = '[drugs]' in line if line.startswith('# ---') else drugs_section
+                        continue
+                    words = WORD_RE.findall(line)
+                    self._add(words, CUSTOM_WORD_COUNT)
+                    self.domain.update(w.lower() for w in words if len(w) >= 3)
+                    if drugs_section:
+                        self.drugs.update(w.lower() for w in words)
         self.domain_list = sorted(self.domain)
         # names from the general dictionary (Maine, Tacoma): never offered when common_only is set, so a
         # patient's name is not "corrected" into a place; names in the clinical / custom files still are
@@ -84,6 +93,13 @@ class Lexicon:
             similar = [w for w in self.domain_list if 0.6 <= len(w) / len(low) <= 1.6 and w not in out]
             out += [w for w, _, _ in process.extract(low, similar, scorer=fuzz.ratio, score_cutoff=55, limit=3)]
         return out
+
+    def bonus(self, word: str, strength: float, domain_bonus: float = 1.0) -> float:
+        """Preference for known words, added to a reader's log-likelihood (0 for unknown words)."""
+        low = word.lower()
+        if low not in self.freq:
+            return 0.0
+        return strength + 0.1 * np.log1p(self.freq[low]) + (domain_bonus if low in self.domain else 0.0)
 
     def _matching_case(self, low: str, original: str) -> str:
         """The candidate written the way the original was (TrOCR gets letter case right far more than letters)."""
@@ -135,9 +151,7 @@ class Lexicon:
 
             lines = [''.join(parts[:i] + [pre + o + post] + parts[i + 1:]) for o in options]
             scores = score_texts(lines)
-            scores = scores + np.array([(strength + 0.1 * np.log1p(self.freq[o.lower()])
-                                         + (domain_bonus if o.lower() in self.domain else 0.0)) if o in self else 0.0
-                                        for o in options])
+            scores = scores + np.array([self.bonus(o, strength, domain_bonus) for o in options])
             order = np.argsort(-scores)
             probs = np.exp(scores - scores[order[0]])
             probs /= probs.sum()
