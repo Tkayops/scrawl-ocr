@@ -19,7 +19,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from typing import Optional
+from typing import List, Optional
 from urllib.parse import urlparse
 
 import cv2
@@ -32,6 +32,21 @@ PROMPT = ('You are transcribing handwriting from a scanned medical document. The
           'line{hint}. Write exactly the characters that are written: keep the original spelling, abbreviations, '
           'numbers, units and punctuation. Do not correct, expand, translate or explain anything. If a word cannot '
           'be read, write [?] for it. Reply with the transcription only.')
+
+
+PAGE_PROMPT = """You are reading a scanned medical form (image attached). An OCR system has already extracted the \
+printed field labels and its reading of the handwritten answers, listed below as JSON. The handwriting readings are \
+often wrong, and some answers were missed completely.
+
+Look at the image and give the handwritten answer of every field you can see, including fields the OCR missed. Copy \
+exactly what is written: keep abbreviations, dates, numbers and units as written; do not correct, expand, translate \
+or explain. Use "" for an empty field and "[?]" for one you cannot read. Never add information that is not written \
+on the page.
+
+OCR reading:
+{ocr}
+
+Reply with JSON only, in this form: {{"fields": [{{"label": "<label as printed>", "value": "<handwritten answer>"}}]}}"""
 
 
 def is_local_address(url: str) -> bool:
@@ -134,6 +149,52 @@ class VisionReader:
                 self._ready, self._checked_at, self.problem = False, time.time(), 'server stopped answering'
             return None
         return _clean(text)
+
+    def read_page(self, bgr: np.ndarray, ocr: dict) -> Optional[List[dict]]:
+        """The model's reading of every form field on a page, given the page and what the OCR read."""
+        prompt = PAGE_PROMPT.format(ocr=json.dumps(ocr, ensure_ascii=False, indent=1))
+        image = _page_image(bgr)
+        try:
+            if self.api == 'openai':
+                out = self._post('/v1/chat/completions', {
+                    'model': self.model, 'temperature': 0, 'max_tokens': 1500,
+                    'messages': [{'role': 'user', 'content': [
+                        {'type': 'text', 'text': prompt},
+                        {'type': 'image_url', 'image_url': {'url': f'data:image/jpeg;base64,{image}'}}]}]})
+                text = out['choices'][0]['message']['content']
+            else:
+                out = self._post('/api/chat', {
+                    'model': self.model, 'stream': False, 'keep_alive': '30m', 'format': 'json',
+                    'options': {'temperature': 0, 'num_predict': 1500},
+                    'messages': [{'role': 'user', 'content': prompt, 'images': [image]}]})
+                text = out['message']['content']
+        except (urllib.error.URLError, OSError, ValueError, KeyError, IndexError):
+            return None
+        return _parse_fields(text)
+
+
+def _page_image(bgr: np.ndarray, max_side: int = 1600) -> str:
+    scale = min(1.0, max_side / max(bgr.shape[:2]))
+    if scale < 1:
+        bgr = cv2.resize(bgr, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+    return base64.b64encode(cv2.imencode('.jpg', bgr, [cv2.IMWRITE_JPEG_QUALITY, 90])[1].tobytes()).decode()
+
+
+def _parse_fields(text: str) -> List[dict]:
+    """The {"fields": [...]} object from a model reply, tolerating code fences and chatter around it."""
+    start, end = text.find('{'), text.rfind('}')
+    if start < 0 or end <= start:
+        return []
+    try:
+        data = json.loads(text[start:end + 1])
+    except ValueError:
+        return []
+    items = data.get('fields', []) if isinstance(data, dict) else data
+    out = []
+    for item in items if isinstance(items, list) else []:
+        if isinstance(item, dict) and isinstance(item.get('label'), str) and isinstance(item.get('value'), (str, int, float)):
+            out.append({'label': item['label'].strip(), 'value': str(item['value']).strip()})
+    return out
 
 
 def _prepare(gray: np.ndarray) -> Optional[np.ndarray]:

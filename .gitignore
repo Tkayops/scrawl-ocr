@@ -15,3 +15,11 @@ results/
 
 # training data (synthetic lines, public datasets, fonts)
 data/
+
+# Azure credentials (endpoint + key) - never commit
+azure.json
+mindee.json
+.venv-mineru/
+# MinerU upload store, in case it is started outside mineru_server.sh - may hold scanned pages
+blobs/
+.mineru-service.lock

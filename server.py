@@ -53,6 +53,12 @@ def status():
                     'vocabulary_words': len(_engine.htr.lexicon) if ready else None,
                     'trocr': ready and _engine._trocr is not None,
                     'vision_model': _engine.vlm() is not None if ready else False,
+                    'azure': {'configured': _engine.azure.configured(), 'description': _engine.azure.describe()}
+                    if ready else None,
+                    'mindee': {'configured': _engine.mindee.configured(), 'description': _engine.mindee.describe()}
+                    if ready else None,
+                    'mineru': {'available': _engine.mineru.available(), 'description': _engine.mineru.describe()}
+                    if ready else None,
                     'hardware': _engine.hardware() if ready else None})
 
 
@@ -63,7 +69,7 @@ def ocr():
     if upload is None:
         return jsonify({'error': 'no file uploaded'}), 400
     form = request.form
-    options = Options(mode=form.get('mode', 'auto'),
+    options = Options(engine=form.get('engine', 'auto'), mode=form.get('mode', 'auto'),
                       tta=form.get('tta', 'true') == 'true',
                       lexicon_strength=float(form.get('lexicon_strength', 3.0)),
                       printed_threshold=float(form.get('printed_threshold', 0.9)),

@@ -15,6 +15,10 @@ from pathlib import Path
 def main() -> None:
     parser = argparse.ArgumentParser(description='Local OCR for messy handwriting and printed/structured documents.')
     parser.add_argument('inputs', nargs='+', type=Path, help='images (png, jpg, tif, ...) or PDFs')
+    parser.add_argument('--engine', choices=['auto', 'local', 'mineru', 'azure', 'mindee'], default='auto',
+                        help='auto: Azure if configured (azure.json / SCRAWL_AZURE_*), else local (TrOCR). '
+                             'mineru: the local MinerU service (./mineru_server.sh). '
+                             'azure / mindee SEND THE PAGES TO THAT CLOUD SERVICE')
     parser.add_argument('--mode', choices=['auto', 'handwriting', 'printed'], default='auto',
                         help='auto decides per line; force one engine if you know what the page is')
     parser.add_argument('--format', choices=['txt', 'md', 'html', 'json', 'csv'], default='txt',
@@ -31,6 +35,8 @@ def main() -> None:
                         help="don't reconsider unclear handwritten words using the surrounding text")
     parser.add_argument('--no-vlm', action='store_true',
                         help="don't ask a local vision-language model (Ollama etc., see SCRAWL_VLM_URL) even if one runs")
+    parser.add_argument('--no-page-prediction', action='store_true',
+                        help="with a vision model: don't also read the whole form and reconcile every field")
     parser.add_argument('--no-rescue', action='store_true', help="don't search for handwriting the detector missed")
     parser.add_argument('--overlay', type=Path, help='save the first page with detected lines drawn on it (PNG)')
     args = parser.parse_args()
@@ -38,10 +44,10 @@ def main() -> None:
     from scrawl import Options, Scrawl
     from scrawl.export import FORMATS
 
-    options = Options(mode=args.mode, tta=not args.no_tta, lexicon_strength=args.lexicon_strength,
+    options = Options(engine=args.engine, mode=args.mode, tta=not args.no_tta, lexicon_strength=args.lexicon_strength,
                       printed_threshold=args.printed_threshold, rescue=not args.no_rescue,
                       handwriting_model='simplehtr' if args.fast else 'trocr', context=not args.no_context,
-                      vlm=not args.no_vlm,
+                      vlm=not args.no_vlm, page_prediction=not args.no_page_prediction,
                       include_image=bool(args.overlay))
     engine = Scrawl()
     many = len(args.inputs) > 1
@@ -49,7 +55,10 @@ def main() -> None:
         args.output.mkdir(parents=True, exist_ok=True)
 
     for path in args.inputs:
-        result = engine.read_file(path, options)
+        try:
+            result = engine.read_file(path, options)
+        except ValueError as exc:  # unreadable file, or an Azure problem (not configured, refused, unreachable)
+            sys.exit(f'{path}: {exc}')
         rendered = FORMATS[args.format](result)
         if args.output:
             target = args.output / f'{path.stem}.{args.format}' if many else args.output

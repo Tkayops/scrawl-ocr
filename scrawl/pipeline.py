@@ -13,7 +13,7 @@ import numpy as np
 from rapidfuzz import fuzz
 
 from . import context as clinical_context
-from . import hardware, imaging, layout, structure, trocr
+from . import azure, document, hardware, imaging, layout, mindee, mineru, structure, trocr
 from .vlm import VisionReader
 from .htr import HandwritingReader, tidy_punctuation
 from .layout import Region
@@ -31,6 +31,8 @@ NAME_FIELD = re.compile(r'name|surname|signature|signed|doctor|\bdr\b|nurse|clin
 
 @dataclass
 class Options:
+    engine: str = 'auto'             # auto (Azure if configured, else local) | local (TrOCR) | mineru (local
+                                     # MinerU service) | azure | mindee (cloud!)
     mode: str = 'auto'               # auto | handwriting | printed
     tta: bool = True                 # read each handwritten line at several stroke widths and average
     lexicon_strength: float = 3.0    # 0 = no dictionary correction; higher = trust the dictionary more
@@ -43,6 +45,7 @@ class Options:
     context_weight: float = 0.5      # how much the clinical language model's opinion counts
     vlm: bool = True                 # accurate mode: also ask a local vision-language model, if one is running
     vlm_veto: float = 25.0           # TrOCR rejects a vision reading only if it fits the image this much worse
+    page_prediction: bool = True     # with a vision model: also read the whole form and reconcile every field
     deskew: bool = True
     include_image: bool = False      # embed the (deskewed) page as a JPEG data URL, for the web UI
 
@@ -58,6 +61,9 @@ class Scrawl:
         self._context = None
         self._context_lock = threading.Lock()
         self._vlm = VisionReader()
+        self.azure = azure.AzureReader()
+        self.mindee = mindee.MindeeReader()
+        self.mineru = mineru.MinerUReader()
 
     def vlm(self):
         """The local vision-language model reader when its server is up and has the model, else None."""
@@ -83,7 +89,8 @@ class Scrawl:
                 'simplehtr': self.htr.device_name,
                 'trocr': self._trocr.device_name if self._trocr is not None else None,
                 'context_model': hardware.torch_device_name(self._context.device) if self._context is not None else None,
-                'vision_model': self._vlm.describe()}
+                'vision_model': self._vlm.describe(), 'mineru': self.mineru.describe(), 'azure': self.azure.describe(),
+                'mindee': self.mindee.describe()}
 
     def reload_vocabulary(self) -> int:
         self.htr.lexicon = default_lexicon(SIMPLEHTR_DIR, [MEDICAL_VOCAB, self.custom_vocab])
@@ -95,11 +102,92 @@ class Scrawl:
     def read_bytes(self, data: bytes, filename: str = '', options: Optional[Options] = None) -> dict:
         options = options or Options()
         start = time.time()
-        pages = [self.read_page(img, options) for img in imaging.load_pages(data, filename)]
+        engine = self.resolve_engine(options.engine)
+        read = {'azure': self.read_page_azure, 'mindee': self.read_page_mindee,
+                'mineru': self.read_page_mineru}.get(engine, self.read_page)
+        pages = [read(img, options) for img in imaging.load_pages(data, filename)]
         for number, page in enumerate(pages, 1):
             page['page'] = number
+            page['engine'] = engine
         return {'source': Path(filename).name if filename else None, 'pages': pages,
                 'options': asdict(options), 'seconds': round(time.time() - start, 2), 'hardware': self.hardware()}
+
+    def resolve_engine(self, engine: str) -> str:
+        if engine == 'azure' and not self.azure.configured():
+            raise azure.AzureError(self.azure.problem())
+        if engine == 'mindee' and not self.mindee.configured():
+            raise mindee.MindeeError(self.mindee.problem())
+        if engine == 'mineru' and not self.mineru.available():
+            raise mineru.MinerUError(self.mineru.problem)
+        if engine == 'auto':
+            return 'azure' if self.azure.configured() else 'local'
+        return engine
+
+    def read_page_azure(self, bgr: np.ndarray, options: Options) -> dict:
+        """Read a page with Azure AI Document Intelligence (the page image is sent to Azure)."""
+        bgr = azure.fit_page(bgr)
+        result = self.azure.analyze(azure.encode_page(bgr))
+        lines, extras = azure.to_lines(result, 0)
+        built = structure.build(lines)
+        # Azure's own key/value pairs and tables are usually better than Scrawl's layout rules on forms
+        fields = [{'label': kv['label'], 'value': kv['value'], 'line_ids': azure.line_ids_in(kv['boxes'], built['lines']),
+                   'confidence': kv['confidence']} for kv in extras['key_values'] if kv['label'] and kv['value']]
+        tables = [{'columns': t['columns'], 'rows': t['rows'], 'line_ids': azure.line_ids_in(t['boxes'], built['lines'])}
+                  for t in extras['tables']]
+        if fields or tables:
+            built['fields'] = fields or built['fields']
+            built['tables'] = tables or built['tables']
+            built['document'] = document.build_blocks(built['lines'], built['rows'], built['fields'], built['tables'])
+            built['formatted_text'] = document.render_text(built['document'])
+        height, width = bgr.shape[:2]
+        page = {'width': width, 'height': height, 'deskew_degrees': round(float(result['pages'][0].get('angle') or 0), 2),
+                'pen_layer': False, 'context_changes': 0, 'vision_changes': 0, 'suggestions': [],
+                'checkboxes': extras['checkboxes'], **built}
+        if options.include_image:
+            page['image'] = _jpeg_data_url(bgr)
+        return page
+
+    def read_page_mindee(self, bgr: np.ndarray, options: Options) -> dict:
+        """Read a page with Mindee's OCR model (the page image is sent to Mindee)."""
+        bgr = azure.fit_page(bgr)
+        kind, result = self.mindee.read(azure.encode_page(bgr))
+        if kind == 'ocr':
+            built = structure.build(mindee.to_lines(result, bgr))
+        else:  # extraction model: Mindee's named fields, and its raw text as the plain text
+            lines, fields, raw = mindee.extraction_page(result, bgr)
+            built = structure.build(lines)
+            built['fields'] = [{'label': f['label'], 'value': f['value'], 'confidence': f['confidence'],
+                                'line_ids': [f['_line']['id']] if f['_line'] is not None else []} for f in fields]
+            built['tables'] = []
+            built['document'] = document.build_blocks(built['lines'], built['rows'], built['fields'], [])
+            field_text = '\n'.join(f"{f['label']}: {f['value']}" for f in built['fields'])
+            built['formatted_text'] = field_text + ('\n\nFull text (Mindee):\n' + raw if raw else '') + '\n'
+            built['text'] = raw or field_text
+        height, width = bgr.shape[:2]
+        page = {'width': width, 'height': height, 'deskew_degrees': 0.0, 'pen_layer': False, 'context_changes': 0,
+                'vision_changes': 0, 'suggestions': [], 'checkboxes': [], **built}
+        if options.include_image:
+            page['image'] = _jpeg_data_url(bgr)
+        return page
+
+    def read_page_mineru(self, bgr: np.ndarray, options: Options) -> dict:
+        """Read a page with the local MinerU service instead of TrOCR (the page stays on this machine)."""
+        bgr = azure.fit_page(bgr)
+        result = self.mineru.parse(cv2.imencode('.png', bgr)[1].tobytes())
+        lines, tables = mineru.to_lines(result['middle'], bgr)
+        built = structure.build(lines)
+        if tables:  # MinerU's table recognition rather than Scrawl's alignment rules
+            built['tables'] = [{'columns': t['columns'], 'rows': t['rows'], 'line_ids': [l['id'] for l in t['lines']]}
+                               for t in tables]
+            built['document'] = document.build_blocks(built['lines'], built['rows'], built['fields'], built['tables'])
+            built['formatted_text'] = document.render_text(built['document'])
+        height, width = bgr.shape[:2]
+        page = {'width': width, 'height': height, 'deskew_degrees': 0.0, 'pen_layer': False, 'context_changes': 0,
+                'vision_changes': 0, 'suggestions': [], 'checkboxes': [], **built,
+                'mineru': {'tier': result['tier'], 'seconds': result['seconds'], 'markdown': result['markdown']}}
+        if options.include_image:
+            page['image'] = _jpeg_data_url(bgr)
+        return page
 
     def read_page(self, bgr: np.ndarray, options: Options) -> dict:
         norm = imaging.normalize_illumination(cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY))
@@ -138,14 +226,18 @@ class Scrawl:
             changes = self._reconstruct(built, options)
             if changes:
                 built = structure.build(built['lines'])  # fields, tables and formatting see the new words
+        suggestions = []
         if options.vlm and options.handwriting_model == 'trocr' and self.vlm() is not None:
             vlm_changes = self._vision_pass(built, options)
             built = structure.build(built['lines'])
+            if options.page_prediction:
+                confirmed, suggestions = self._page_prediction_pass(built, bgr, options)
         for line in built['lines']:
             line.pop('_scorer', None)
             line.pop('_crop', None)
         page = {'width': width, 'height': height, 'deskew_degrees': round(angle, 2),
-                'pen_layer': pen is not None, 'context_changes': changes, 'vision_changes': vlm_changes, **built}
+                'pen_layer': pen is not None, 'context_changes': changes, 'vision_changes': vlm_changes,
+                'suggestions': suggestions, **built}
         if options.include_image:
             page['image'] = _jpeg_data_url(bgr)
         return page
@@ -215,9 +307,9 @@ class Scrawl:
 
         The model never sees TrOCR's reading. Its reading wins unless TrOCR, scoring both against the image,
         finds it clearly incompatible: measured on a real referral letter, correct readings TrOCR had wrong
-        scored -21..+9 against TrOCR's own, invented ones -32 or worse, hence `vlm_veto` = 25. Accepted changes
-        to numbers or medicine names, doubtful acceptances and near-miss rejections are flagged for review."""
-        reader, lexicon, veto = self.vlm(), self.htr.lexicon, options.vlm_veto
+        scored -21..+9 against TrOCR's own, invented ones -32 or worse, hence `vlm_veto` = 25. Every change it
+        makes is flagged for review: wrong but plausible readings fit the image as well as true ones."""
+        reader, veto = self.vlm(), options.vlm_veto
         lines, rows = built['lines'], built['rows']
         by_id = {line['id']: line for line in lines}
         row_of = {i: r for r, row in enumerate(rows) for i in row}
@@ -248,16 +340,72 @@ class Scrawl:
                             words=[{'text': w, 'confidence': None, 'alternatives': [], 'read_as': None}
                                    for w in seen.split()])
                 changed += 1
-            risky = _digits(current) != _digits(seen) or bool(_drug_words(current, lexicon) ^ _drug_words(seen, lexicon))
-            doubtful = accepted and gap < -veto / 2
             near_miss = not accepted and gap > -veto - 5
-            # a reading that doesn't fit the image at all was most likely invented: kept only as an alternative
-            if (accepted and risky) or doubtful or near_miss:
+            # Every accepted change is flagged: plausible wrong readings (LE -> RE, swapped digits, a similar name)
+            # fit the image as well as true corrections do, so a person decides. A reading that doesn't fit the
+            # image at all was most likely invented and is kept only as an alternative.
+            if accepted or near_miss:
                 line['needs_review'] = True
         for line in lines:
             if line.get('needs_review'):
                 line['confidence'] = min(line['confidence'], 0.59)  # shows as "please check" everywhere
         return changed
+
+    def _page_prediction_pass(self, built: dict, bgr: np.ndarray, options: Options):
+        """Let the vision model read the whole form, given what the OCR read, and compare field by field.
+
+        It never changes the text. Measured on a real referral letter, TrOCR's image check cannot tell a correct
+        correction from a plausible wrong one (LE -> RE, swapped digits, a similar name all fit the image as well
+        as true corrections do), so model predictions may only confirm the OCR ("2 readers agree") or become
+        suggestions that a person accepts with a click. Each suggestion is tied to the OCR line it would replace
+        when one can be found (the field's value line, or an unassigned handwritten line that looks alike), and
+        says whether it fits that line's handwriting."""
+        reader = self.vlm()
+        lines, fields = built['lines'], built['fields']
+        by_id = {line['id']: line for line in lines}
+        in_fields = {i for f in fields for i in f['line_ids']}
+        loose = [l for l in lines if l['engine'] == 'handwriting' and l['id'] not in in_fields]
+        ocr = {'fields': [{'label': f['label'], 'value': f['value']} for f in fields],
+               'other_handwriting': [l['text'] for l in loose]}
+        predicted = reader.read_page(bgr, ocr) or []
+        confirmed, suggestions = 0, []
+        for item in predicted:
+            label, value = item['label'], item['value']
+            if not value or '[?]' in value:
+                continue
+            field = max(fields, key=lambda f: fuzz.ratio(_letters(f['label']), _letters(label)), default=None)
+            if field is not None and fuzz.ratio(_letters(field['label']), _letters(label)) < 80:
+                field = None
+            if field is not None:
+                value_lines = [by_id[i] for i in field['line_ids'][1:]]
+                handwritten = [l for l in value_lines if l['engine'] == 'handwriting']
+                if value_lines and not handwritten and _letters(field['value']) != _letters(value):
+                    continue  # a printed value: the printed-text reader is reliable there
+                ocr_value = field['value']
+                target = handwritten[0] if len(value_lines) == 1 and handwritten else None
+                agreeing = handwritten
+            else:
+                target = max(loose, key=lambda l: fuzz.ratio(_letters(l['text']), _letters(value)), default=None)
+                if target is not None and fuzz.ratio(_letters(target['text']), _letters(value)) < 70:
+                    target = None  # too different to be sure it is the same answer (Accept would hit the wrong line)
+                ocr_value = target['text'] if target is not None else None
+                agreeing = [target] if target is not None else []
+            if ocr_value is not None and _letters(ocr_value) == _letters(value):
+                for line in agreeing:
+                    line.update(readers_agree=True, confidence=max(line['confidence'], 0.9))
+                confirmed += 1
+                continue
+            fits = None
+            if target is not None and target.get('_scorer') is not None:
+                ll_current, ll_value = target['_scorer']([target['text'], value])
+                fits = bool(ll_value - ll_current > -options.vlm_veto)
+            reason = ('the OCR did not find this field' if ocr_value is None else
+                      'differs from the OCR reading' + ('' if fits is None else ' (fits the handwriting)' if fits
+                                                        else ' and does not fit the handwriting: probably wrong'))
+            suggestions.append({'label': label, 'value': value, 'ocr_value': ocr_value,
+                                'line_id': target['id'] if target is not None else None,
+                                'fits_handwriting': fits, 'reason': reason})
+        return confirmed, suggestions
 
     def _reconstruct(self, built: dict, options: Options) -> int:
         """Second look at handwritten words the reader was unsure of, using the text around them.
@@ -348,14 +496,6 @@ class Scrawl:
             new += [left, right]
         self._read_printed(clean, new)
         return out
-
-
-def _digits(text: str) -> str:
-    return re.sub(r'\D', '', text)
-
-
-def _drug_words(text: str, lexicon) -> set:
-    return {w.lower() for w in WORD_RE.findall(text) if w.lower() in lexicon.drugs}
 
 
 def _letters(text: str) -> str:

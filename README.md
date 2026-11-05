@@ -11,6 +11,7 @@ web UI loads nothing from the internet.
 | Handwriting, **Fast** | [SimpleHTR](https://github.com/githubharald/SimpleHTR) line model (TensorFlow, IAM-trained), plus the accuracy boosters below |
 | Reconstructing unclear words (Accurate mode) | [Bio_ClinicalBERT](https://huggingface.co/emilyalsentzer/Bio_ClinicalBERT), a clinical language model, together with TrOCR |
 | Second opinion on handwriting (optional) | A vision-language model on a **local** server (Ollama, LM Studio, mlx-vlm, vLLM), e.g. Qwen2.5-VL 7B |
+| Alternative reader instead of TrOCR (optional) | [MinerU](https://github.com/opendatalab/MinerU) as a **local** service: layout, tables, OCR and its 1.2B vision model |
 | Printed text and text detection | RapidOCR (PaddleOCR PP-OCRv4 via ONNX Runtime, models bundled in the pip wheel) |
 | PDFs | pypdfium2 (each page rendered at 200 dpi) |
 
@@ -98,16 +99,142 @@ qwen2.5vl:7b at ...". To use another server or model, set `SCRAWL_VLM_URL`, `SCR
   refused unless `SCRAWL_VLM_ALLOW_REMOTE=1`, which would send documents off the network.
 * **It never sees TrOCR's reading,** but gets the field label as a hint ("answer to 'Provisional
   Diagnosis'").
-* **Its reading wins unless TrOCR finds it clearly incompatible with the image.** On a real referral
-  letter, correct readings that TrOCR had got wrong scored between −21 and +9 against TrOCR's own reading,
-  while invented text scored −32 or worse. Hence the cut-off of 25 (`vlm_veto`).
-* **Flags:** changed numbers or medicine names, doubtful acceptances and near-misses are marked
-  **check** in the Lines tab. Lines both readers agree on are marked **2 readers agree**.
-* **Switching it off:** use `--no-vlm`, or stop the server.
-* **Tested with simulated readers on the referral letter**, not yet with a real model:
-  * A correct simulated reader cut the page's handwriting errors from 18 to 4 characters (of 160).
-  * An inventing reader changed nothing.
-  * How much a real model helps has to be measured on the Mac.
+* **Line by line:** its reading becomes the main reading unless TrOCR finds it clearly incompatible with
+  the image. On a real referral letter, correct readings that TrOCR had got wrong scored between −21 and
+  +9 against TrOCR's own reading, while invented text scored −32 or worse. Hence the cut-off of 25
+  (`vlm_veto`).
+* **Every change it makes is flagged check, with the other reading shown.** The same measurements showed
+  why: plausible wrong readings fit the image just as well as true corrections. The wrong eye ("RE" for
+  "LE") scored −6, a similar doctor's name −7, a swapped digit −17. So a person decides. Lines both readers
+  agree on are marked **2 readers agree**.
+* **Whole-page prediction:** the model also gets the whole page together with what the OCR read, and
+  returns every field, including ones the OCR missed.
+  * **It never changes the text.** Values that match the OCR confirm it.
+  * **Everything else becomes a suggestion**, tied to the line it would replace and saying whether it
+    fits the handwriting. In the web UI one click on **Accept** applies it as a reviewed edit.
+  * In the TXT, Markdown and HTML downloads, suggestions are listed separately as "not applied, please
+    check".
+* **Testing so far:** tested with simulated models on the referral letter. A correct line reader cut the
+  handwriting errors from 18 to 2 characters (of 160), every change flagged. An inventing one changed
+  nothing. How much a real model helps has to be measured on the Mac.
+* **Switching it off:** use `--no-vlm` for both steps, or stop the server.
+
+### Optional: MinerU engine (local; for the Mac or a GPU machine)
+
+[MinerU](https://github.com/opendatalab/MinerU) is a document parser. It finds the page layout, reading order
+and tables, reads printed text, and at its **Standard** tier reads every text block with its own 1.2B
+vision-language model. Scrawl can use it **instead of TrOCR**: the toolbar then shows **TrOCR | MinerU**, and
+you switch per document. It runs on your machine, so pages never leave it.
+
+On the Mac (one terminal for MinerU, one for Scrawl):
+
+```bash
+./setup_mineru.sh               # once: MinerU 4.1.7 in .venv-mineru, plus about 2 GB of models
+./mineru_server.sh              # leave running: MinerU on http://127.0.0.1:8766
+.venv/bin/python server.py      # second terminal, then open http://127.0.0.1:8765 and choose MinerU
+```
+
+On the command line, use `--engine mineru`. To compare the two readers on the bundled samples:
+
+```bash
+.venv/bin/python tests/eval_samples.py --engine local
+.venv/bin/python tests/eval_samples.py --engine mineru
+```
+
+* **Privacy:**
+  * Scrawl only talks to MinerU on this machine or the private network, and refuses upload or result
+    links that point anywhere else.
+  * The scripts switch MinerU's usage statistics off and forbid downloads while reading.
+  * MinerU keeps uploaded pages and results for **10 minutes** instead of its default 24 hours.
+  * Uploads and MinerU's working copies stay in `vendor/mineru-home`, which git ignores. The working
+    folder is emptied every time MinerU starts.
+* **Hardware:**
+  * An Apple Silicon Mac with 16 GB or more runs the Standard tier on its GPU (Metal).
+  * On this project's 2-core, 7 GB test laptop, one page didn't finish in 20 minutes, so the run was
+    stopped. Small machines can use `./setup_mineru.sh basic` and `./mineru_server.sh basic`, which give
+    layout and printed OCR only, without the vision model.
+* **What changes with MinerU:**
+  * MinerU locates blocks, not lines. Scrawl cuts each block into rows at the gaps in the ink and shares
+    the words out by the words written on each row. On `sample_2.png`, 69 of 78 words land on their
+    own row.
+  * Titles and tables come from MinerU.
+  * A line counts as handwritten only when its ink is coloured, so black-ink handwriting shows as
+    "printed".
+  * MinerU reports no confidence.
+  * TrOCR's settings (mode, Dictionary, Accurate/Fast) and the context, vision-model and whole-page
+    passes don't apply.
+* **Accuracy: not measured yet.** MinerU is built for printed documents and its documentation doesn't
+  mention handwriting. Run the comparison above on the Mac and judge with your own forms.
+
+### Optional: Azure cloud engine (sends documents to Microsoft)
+
+Instead of reading on this computer, Scrawl can send each page to **Azure AI Document Intelligence**
+(`prebuilt-layout`). Azure returns:
+* the text, marked handwritten or printed;
+* label/value pairs, tables and ticked checkboxes.
+
+Scrawl turns these into the same fields, tables, formatted text and downloads as the local engine.
+
+**Patient documents leave your machine and network.** Only use it where your data-protection
+arrangements allow: a data processing agreement with Microsoft, an approved Azure region, and Kenya Data
+Protection Act rules for sensitive (health) data.
+
+1. In the Azure portal, create an **Azure AI Document Intelligence** resource in a region you are
+   allowed to use. The free tier is limited, for example 4 MB per file; pages are sent as JPEG, about
+   1 MB.
+2. Put its endpoint and key in `azure.json` in the project folder. This file is in `.gitignore`, so it
+   won't be committed:
+
+   ```json
+   {"endpoint": "https://<your-resource>.cognitiveservices.azure.com/", "key": "<key>", "model": "prebuilt-layout"}
+   ```
+
+   Or set `SCRAWL_AZURE_ENDPOINT`, `SCRAWL_AZURE_KEY` and optionally `SCRAWL_AZURE_MODEL` (`prebuilt-read`
+   is cheaper, text only).
+3. Start the server.
+   * The toolbar shows **TrOCR / Azure cloud** with Azure selected, plus a banner saying pages are sent
+     to Microsoft.
+   * Switch to **TrOCR** (or **MinerU**) to keep a document on the machine.
+   * On the command line, `--engine azure|local|auto` does the same; auto means Azure when it's
+     configured.
+
+Notes:
+* The key is only ever sent to Azure AI services addresses (`*.cognitiveservices.azure.com` and similar).
+* In Azure mode the local extras don't apply: dictionary correction, clinical context, vision model.
+
+### Optional: Mindee cloud engine (free 14-day trial, no card; sends documents to Mindee)
+
+Mindee's trial gives **200 pages over 14 days**, with no credit card. That's enough to compare it with
+the local engine and Azure on sample or anonymised forms. Mindee says documents aren't used for training,
+and that results are kept for up to 24 hours. A BAA (health-data agreement) is only offered to enterprise
+customers, so **don't use the trial for real patient data**.
+
+1. Sign up at app.mindee.com and create a model. Either kind works, and Scrawl detects which one it is:
+   * an **OCR model** (Models → Create → Document Utilities → OCR) returns every word with its position;
+   * an **Extraction model** (your own field list, e.g. patient name, diagnosis, treatment plan) returns those
+     fields with confidence and location, plus the full raw text.
+
+   An extraction model **interprets** the page to fill its fields. In testing it filed "Referred by:
+   Philip" under "Doctor name" and reformatted a date. So check field values against the raw text, which
+   is shown as the plain text.
+
+   Copy the model's **ID**, then under **Settings → API Keys** create a key (`md_...`).
+2. Put the key and model ID in `mindee.json` in the project folder (it's in `.gitignore`):
+
+   ```json
+   {"key": "md_...", "model_id": "<model id>"}
+   ```
+
+   Or set `SCRAWL_MINDEE_KEY` and `SCRAWL_MINDEE_MODEL_ID`.
+3. Restart the server and choose **Mindee cloud** in the toolbar, or use `--engine mindee`.
+   * Mindee is never picked automatically.
+   * The banner says pages are sent to Mindee.
+
+**How Scrawl handles Mindee's output (OCR model):** it returns words with positions, but no lines,
+confidence or handwriting flag. So Scrawl:
+* joins the words into lines;
+* marks a line handwritten when its ink is mostly coloured pen;
+* builds fields, tables and formatted text the same way as for the local engine.
 
 ### Command line
 
@@ -124,6 +251,11 @@ The main options:
 * `--mode auto|handwriting|printed`
 * `--lexicon-strength 0..6` (default 3)
 * `--printed-threshold` (default 0.9)
+* `--engine auto|local|mineru|azure|mindee`:
+  * `local` is TrOCR.
+  * `mineru` is the local MinerU service.
+  * `azure` and `mindee` send pages to that service.
+  * `auto` uses Azure only when it's configured, and never MinerU or Mindee.
 * `--fast`: SimpleHTR instead of TrOCR
 * `--no-context`: skip reconstructing unclear words from the surrounding text
 * `--no-vlm`: don't ask a local vision-language model even if one is running
@@ -286,6 +418,11 @@ SimpleHTR can be fine-tuned. Collect line images with their transcriptions in IA
   trained on MIMIC-III clinical notes, downloaded by `setup.sh`.
 * [RapidOCR](https://github.com/RapidAI/RapidOCR) (Apache-2.0) with PaddleOCR PP-OCRv4 models
   (Apache-2.0).
+* [MinerU](https://github.com/opendatalab/MinerU) (optional, installed separately by `setup_mineru.sh`)
+  uses the MinerU Open Source License: Apache-2.0 with extra terms.
+  * A separate commercial licence is needed above 100 million monthly users or USD 20 million monthly
+    revenue.
+  * An online service built on it must say it uses MinerU.
 * The handwriting models were trained on the IAM Handwriting Database, which has its own terms for
   commercial use.
 
@@ -295,7 +432,8 @@ SimpleHTR can be fine-tuned. Collect line images with their transcriptions in IA
 ocr.py               command line
 server.py, web/      local web UI (127.0.0.1 only)
 scrawl/              pipeline: hardware (GPU / threads), imaging (incl. pen layer), layout, htr (SimpleHTR),
-                     trocr, context (clinical language model), vlm (local vision model), ctc, lexicon,
+                     trocr, context (clinical language model), vlm (local vision model), mineru (local
+                     MinerU service), azure and mindee (cloud engines), ctc, lexicon,
                      printed, structure,
                      document (formatting), export
 vocab/               your custom words
@@ -303,4 +441,6 @@ vendor/SimpleHTR/    upstream SimpleHTR code (unchanged)
 models/line/         SimpleHTR pretrained line model
 models/hf/           TrOCR and Bio_ClinicalBERT (downloaded once by setup.sh, then used offline)
 samples/, tests/     sample pages, test-form generator and accuracy check
+setup_mineru.sh,     optional MinerU engine: install it into .venv-mineru (models in vendor/mineru-home),
+mineru_server.sh     and start it
 ```

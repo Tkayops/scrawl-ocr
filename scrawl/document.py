@@ -52,8 +52,9 @@ def build_blocks(lines: List[dict], rows: List[List[int]], fields: List[dict], t
             height = line['bbox'][3] - line['bbox'][1]
             big = height >= 1.2 * line_height and len(line['text'].split()) <= 8 and \
                 sum(c.isdigit() for c in line['text']) <= 2 and not re.search(r'@|www\.|https?:', line['text'])
-            if line['engine'] == 'printed' and (big or _looks_like_heading(line['text'])):
-                blocks.append({'type': 'heading', 'level': 1 if big else 2, 'text': line['text'], 'line_ids': ids})
+            known = line.get('heading')  # readers that find titles themselves (MinerU) give a level, or False
+            if known or (known is None and line['engine'] == 'printed' and (big or _looks_like_heading(line['text']))):
+                blocks.append({'type': 'heading', 'level': known or (1 if big else 2), 'text': line['text'], 'line_ids': ids})
                 used.update(ids)
                 continue
 
@@ -227,12 +228,30 @@ def render_html_blocks(blocks: List[dict]) -> str:
     return '\n'.join(out)
 
 
+def render_suggestions_text(suggestions: List[dict]) -> str:
+    if not suggestions:
+        return ''
+    out = ['', 'Suggested by the vision model - NOT applied, please check against the document:']
+    out += [f"  {s['label']}: {s['value']}  ({s['reason']})" for s in suggestions]
+    return '\n'.join(out) + '\n'
+
+
+def render_suggestions_html(suggestions: List[dict]) -> str:
+    if not suggestions:
+        return ''
+    rows = ''.join(f'<tr><td>{html.escape(s["label"])}</td><td class="low">{html.escape(s["value"])}</td>'
+                   f'<td>{html.escape(s["reason"])}</td></tr>' for s in suggestions)
+    return ('<h3>Suggested by the vision model: not applied, please check</h3>'
+            f'<table><thead><tr><th>Field</th><th>Suggested value</th><th>Why it is only a suggestion</th></tr></thead>'
+            f'<tbody>{rows}</tbody></table>')
+
+
 def render_html(result: Dict) -> str:
     title = html.escape(result.get('source') or 'Scanned document')
     pages = result['pages']
     body = ''.join(
         f'<section class="page">{"<h1>Page " + str(p["page"]) + "</h1>" if len(pages) > 1 else ""}'
-        f'{render_html_blocks(p["document"])}</section>' for p in pages)
+        f'{render_html_blocks(p["document"])}{render_suggestions_html(p.get("suggestions", []))}</section>' for p in pages)
     return (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><title>{title}</title>'
             f'<meta name="viewport" content="width=device-width, initial-scale=1"><style>{HTML_STYLE}</style></head>'
             f'<body><div class="meta">{title} · read locally by Scrawl</div>'

@@ -2,6 +2,7 @@
 """Character error rate of the full pipeline on the bundled sample pages (ground truth typed by hand).
 
   .venv/bin/python tests/eval_samples.py [--mode handwriting] [--no-tta] [--lexicon-strength 0]
+  .venv/bin/python tests/eval_samples.py --engine mineru      the same check with MinerU (./mineru_server.sh)
 """
 import argparse
 import sys
@@ -35,6 +36,7 @@ you see?'""",
 
 def main() -> None:
     parser = argparse.ArgumentParser()
+    parser.add_argument('--engine', default='local', help='local (TrOCR) | mineru | azure | mindee')
     parser.add_argument('--mode', default='auto')
     parser.add_argument('--no-tta', action='store_true')
     parser.add_argument('--lexicon-strength', type=float, default=3.0)
@@ -43,7 +45,7 @@ def main() -> None:
 
     from scrawl import Options, Scrawl
     engine = Scrawl()
-    options = Options(mode=args.mode, tta=not args.no_tta, lexicon_strength=args.lexicon_strength)
+    options = Options(engine=args.engine, mode=args.mode, tta=not args.no_tta, lexicon_strength=args.lexicon_strength)
     total_err = total_len = 0
     for name, truth in GROUND_TRUTH.items():
         start = time.time()
