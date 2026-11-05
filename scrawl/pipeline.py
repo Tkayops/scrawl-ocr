@@ -14,6 +14,7 @@ from rapidfuzz import fuzz
 
 from . import context as clinical_context
 from . import hardware, imaging, layout, structure, trocr
+from .vlm import VisionReader
 from .htr import HandwritingReader, tidy_punctuation
 from .layout import Region
 from .lexicon import WORD_RE, default_lexicon
@@ -40,6 +41,8 @@ class Options:
     handwriting_model: str = 'trocr'  # trocr (accurate, ~3 s/line) | simplehtr (fast); trocr needs its model
     context: bool = True             # accurate mode: reconsider unclear words using the sentence around them
     context_weight: float = 0.5      # how much the clinical language model's opinion counts
+    vlm: bool = True                 # accurate mode: also ask a local vision-language model, if one is running
+    vlm_veto: float = 25.0           # TrOCR rejects a vision reading only if it fits the image this much worse
     deskew: bool = True
     include_image: bool = False      # embed the (deskewed) page as a JPEG data URL, for the web UI
 
@@ -54,6 +57,11 @@ class Scrawl:
         self._trocr_lock = threading.Lock()
         self._context = None
         self._context_lock = threading.Lock()
+        self._vlm = VisionReader()
+
+    def vlm(self):
+        """The local vision-language model reader when its server is up and has the model, else None."""
+        return self._vlm if self._vlm.available() else None
 
     def context(self):
         """The clinical language model, loaded on first use; None if it is not installed."""
@@ -74,7 +82,8 @@ class Scrawl:
         return {'cpu_threads': hardware.CPU_THREADS, 'detection_and_printed': self.printed.device,
                 'simplehtr': self.htr.device_name,
                 'trocr': self._trocr.device_name if self._trocr is not None else None,
-                'context_model': hardware.torch_device_name(self._context.device) if self._context is not None else None}
+                'context_model': hardware.torch_device_name(self._context.device) if self._context is not None else None,
+                'vision_model': self._vlm.describe()}
 
     def reload_vocabulary(self) -> int:
         self.htr.lexicon = default_lexicon(SIMPLEHTR_DIR, [MEDICAL_VOCAB, self.custom_vocab])
@@ -124,15 +133,19 @@ class Scrawl:
                 lines.append(line)
 
         built = structure.build(lines)
-        changes = 0
+        changes = vlm_changes = 0
         if options.context and options.handwriting_model == 'trocr' and self.context() is not None:
             changes = self._reconstruct(built, options)
             if changes:
                 built = structure.build(built['lines'])  # fields, tables and formatting see the new words
+        if options.vlm and options.handwriting_model == 'trocr' and self.vlm() is not None:
+            vlm_changes = self._vision_pass(built, options)
+            built = structure.build(built['lines'])
         for line in built['lines']:
             line.pop('_scorer', None)
+            line.pop('_crop', None)
         page = {'width': width, 'height': height, 'deskew_degrees': round(angle, 2),
-                'pen_layer': pen is not None, 'context_changes': changes, **built}
+                'pen_layer': pen is not None, 'context_changes': changes, 'vision_changes': vlm_changes, **built}
         if options.include_image:
             page['image'] = _jpeg_data_url(bgr)
         return page
@@ -193,8 +206,58 @@ class Scrawl:
                 continue
             if not pen and line['reader'] == 'printed-ocr':
                 line['engine'] = 'printed'
+            line['_crop'] = crop  # for the vision model pass
             lines.append(line)
         return lines
+
+    def _vision_pass(self, built: dict, options: Options) -> int:
+        """Ask the local vision-language model to read every handwritten line, then reconcile.
+
+        The model never sees TrOCR's reading. Its reading wins unless TrOCR, scoring both against the image,
+        finds it clearly incompatible: measured on a real referral letter, correct readings TrOCR had wrong
+        scored -21..+9 against TrOCR's own, invented ones -32 or worse, hence `vlm_veto` = 25. Accepted changes
+        to numbers or medicine names, doubtful acceptances and near-miss rejections are flagged for review."""
+        reader, lexicon, veto = self.vlm(), self.htr.lexicon, options.vlm_veto
+        lines, rows = built['lines'], built['rows']
+        by_id = {line['id']: line for line in lines}
+        row_of = {i: r for r, row in enumerate(rows) for i in row}
+        changed = 0
+        for line in lines:
+            crop = line.get('_crop')
+            if crop is None or line['engine'] != 'handwriting':
+                continue
+            row = rows[row_of[line['id']]]
+            labels = [by_id[i]['text'] for i in row[:row.index(line['id'])] if by_id[i]['engine'] == 'printed']
+            seen = reader.read(crop, structure._clean_label(labels[-1]) if labels else None)
+            if not seen:
+                continue
+            current = line['text']
+            line['vlm_reading'] = seen
+            if _letters(seen) == _letters(current):  # same letters: keep the vision model's punctuation (N/A, not N.A)
+                line.update(text=seen, readers_agree=True, confidence=max(line['confidence'], 0.9))
+                continue
+            scorer = line.get('_scorer')
+            if scorer is None or '[?]' in seen:
+                line['needs_review'] = True  # two readings, no way to check which fits the image
+                continue
+            ll_current, ll_seen = scorer([current, seen])
+            gap = float(ll_seen - ll_current)  # how much worse the vision reading fits the image, per TrOCR
+            accepted = gap > -veto
+            if accepted:
+                line.update(text=seen, reader='vlm', trocr_text=current,
+                            words=[{'text': w, 'confidence': None, 'alternatives': [], 'read_as': None}
+                                   for w in seen.split()])
+                changed += 1
+            risky = _digits(current) != _digits(seen) or bool(_drug_words(current, lexicon) ^ _drug_words(seen, lexicon))
+            doubtful = accepted and gap < -veto / 2
+            near_miss = not accepted and gap > -veto - 5
+            # a reading that doesn't fit the image at all was most likely invented: kept only as an alternative
+            if (accepted and risky) or doubtful or near_miss:
+                line['needs_review'] = True
+        for line in lines:
+            if line.get('needs_review'):
+                line['confidence'] = min(line['confidence'], 0.59)  # shows as "please check" everywhere
+        return changed
 
     def _reconstruct(self, built: dict, options: Options) -> int:
         """Second look at handwritten words the reader was unsure of, using the text around them.
@@ -285,6 +348,14 @@ class Scrawl:
             new += [left, right]
         self._read_printed(clean, new)
         return out
+
+
+def _digits(text: str) -> str:
+    return re.sub(r'\D', '', text)
+
+
+def _drug_words(text: str, lexicon) -> set:
+    return {w.lower() for w in WORD_RE.findall(text) if w.lower() in lexicon.drugs}
 
 
 def _letters(text: str) -> str:

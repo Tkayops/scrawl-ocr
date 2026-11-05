@@ -52,6 +52,7 @@ def status():
     return jsonify({'ready': ready, 'error': _engine_error,
                     'vocabulary_words': len(_engine.htr.lexicon) if ready else None,
                     'trocr': ready and _engine._trocr is not None,
+                    'vision_model': _engine.vlm() is not None if ready else False,
                     'hardware': _engine.hardware() if ready else None})
 
 
@@ -68,6 +69,7 @@ def ocr():
                       printed_threshold=float(form.get('printed_threshold', 0.9)),
                       handwriting_model=form.get('handwriting_model', 'trocr'),
                       context=form.get('context', 'true') == 'true',
+                      vlm=form.get('vlm', 'true') == 'true',
                       include_image=True)
     try:
         return jsonify(engine().read_bytes(upload.read(), upload.filename or '', options))

@@ -29,6 +29,8 @@ def main() -> None:
     parser.add_argument('--no-tta', action='store_true', help='with --fast: read each handwritten line once')
     parser.add_argument('--no-context', action='store_true',
                         help="don't reconsider unclear handwritten words using the surrounding text")
+    parser.add_argument('--no-vlm', action='store_true',
+                        help="don't ask a local vision-language model (Ollama etc., see SCRAWL_VLM_URL) even if one runs")
     parser.add_argument('--no-rescue', action='store_true', help="don't search for handwriting the detector missed")
     parser.add_argument('--overlay', type=Path, help='save the first page with detected lines drawn on it (PNG)')
     args = parser.parse_args()
@@ -39,6 +41,7 @@ def main() -> None:
     options = Options(mode=args.mode, tta=not args.no_tta, lexicon_strength=args.lexicon_strength,
                       printed_threshold=args.printed_threshold, rescue=not args.no_rescue,
                       handwriting_model='simplehtr' if args.fast else 'trocr', context=not args.no_context,
+                      vlm=not args.no_vlm,
                       include_image=bool(args.overlay))
     engine = Scrawl()
     many = len(args.inputs) > 1

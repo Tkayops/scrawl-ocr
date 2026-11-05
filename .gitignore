@@ -12,3 +12,6 @@ __pycache__/
 *.log
 out/
 results/
+
+# training data (synthetic lines, public datasets, fonts)
+data/

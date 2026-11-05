@@ -10,6 +10,7 @@ web UI loads nothing from the internet.
 | Handwriting, **Accurate** (default) | Microsoft [TrOCR](https://huggingface.co/microsoft/trocr-base-handwritten) base-handwritten (PyTorch, CPU), cross-checked with SimpleHTR |
 | Handwriting, **Fast** | [SimpleHTR](https://github.com/githubharald/SimpleHTR) line model (TensorFlow, IAM-trained), plus the accuracy boosters below |
 | Reconstructing unclear words (Accurate mode) | [Bio_ClinicalBERT](https://huggingface.co/emilyalsentzer/Bio_ClinicalBERT), a clinical language model, together with TrOCR |
+| Second opinion on handwriting (optional) | A vision-language model on a **local** server (Ollama, LM Studio, mlx-vlm, vLLM), e.g. Qwen2.5-VL 7B |
 | Printed text and text detection | RapidOCR (PaddleOCR PP-OCRv4 via ONNX Runtime, models bundled in the pip wheel) |
 | PDFs | pypdfium2 (each page rendered at 200 dpi) |
 
@@ -74,6 +75,40 @@ Then open http://127.0.0.1:8765. Drop in a scan, photo or PDF, or click one of t
 On the 2-core / 4-thread laptop this was built on, using all 4 threads made text detection 2.3× faster
 (4.0 s to 1.7 s per page). TrOCR stayed about the same there, because its 2 real cores were already busy.
 
+### Optional: a local vision-language model (best on an Apple Silicon Mac or a GPU machine)
+
+A vision-language model reads each handwritten line as an independent second reader. On a Mac (e.g. M1 Pro,
+32 GB):
+
+```bash
+brew install ollama
+```
+```bash
+ollama serve
+```
+```bash
+ollama pull qwen2.5vl:7b
+```
+
+Scrawl finds it automatically at `http://127.0.0.1:11434`; the web UI's status line shows "Vision model:
+qwen2.5vl:7b at ...". To use another server or model, set `SCRAWL_VLM_URL`, `SCRAWL_VLM_MODEL` and
+`SCRAWL_VLM_API` (`ollama` or `openai` for OpenAI-compatible servers such as LM Studio, mlx-vlm or vLLM).
+
+* **Privacy:** only servers on this machine or the private network are accepted. A public address is
+  refused unless `SCRAWL_VLM_ALLOW_REMOTE=1`, which would send documents off the network.
+* **It never sees TrOCR's reading,** but gets the field label as a hint ("answer to 'Provisional
+  Diagnosis'").
+* **Its reading wins unless TrOCR finds it clearly incompatible with the image.** On a real referral
+  letter, correct readings that TrOCR had got wrong scored between −21 and +9 against TrOCR's own reading,
+  while invented text scored −32 or worse. Hence the cut-off of 25 (`vlm_veto`).
+* **Flags:** changed numbers or medicine names, doubtful acceptances and near-misses are marked
+  **check** in the Lines tab. Lines both readers agree on are marked **2 readers agree**.
+* **Switching it off:** use `--no-vlm`, or stop the server.
+* **Tested with simulated readers on the referral letter**, not yet with a real model:
+  * A correct simulated reader cut the page's handwriting errors from 18 to 4 characters (of 160).
+  * An inventing reader changed nothing.
+  * How much a real model helps has to be measured on the Mac.
+
 ### Command line
 
 ```bash
@@ -91,6 +126,7 @@ The main options:
 * `--printed-threshold` (default 0.9)
 * `--fast`: SimpleHTR instead of TrOCR
 * `--no-context`: skip reconstructing unclear words from the surrounding text
+* `--no-vlm`: don't ask a local vision-language model even if one is running
 * `--no-tta`: with `--fast`, faster still
 * `--no-rescue`
 
@@ -259,7 +295,8 @@ SimpleHTR can be fine-tuned. Collect line images with their transcriptions in IA
 ocr.py               command line
 server.py, web/      local web UI (127.0.0.1 only)
 scrawl/              pipeline: hardware (GPU / threads), imaging (incl. pen layer), layout, htr (SimpleHTR),
-                     trocr, context (clinical language model), ctc, lexicon, printed, structure,
+                     trocr, context (clinical language model), vlm (local vision model), ctc, lexicon,
+                     printed, structure,
                      document (formatting), export
 vocab/               your custom words
 vendor/SimpleHTR/    upstream SimpleHTR code (unchanged)

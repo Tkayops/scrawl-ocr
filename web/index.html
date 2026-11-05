@@ -126,6 +126,9 @@ ol.lines { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .meter { width: 44px; height: 5px; border-radius: 3px; background: var(--line); overflow: hidden; }
 .meter i { display: block; height: 100%; }
 .edited { color: var(--accent); }
+.flag { padding: 1px 7px; border-radius: 999px; font-weight: 600; }
+.flag.check { background: var(--warn-soft); color: var(--warn); }
+.flag.agree { background: rgba(43, 138, 62, .12); color: var(--ok); }
 .line-head .edit { margin-left: auto; border: 0; background: none; color: var(--muted); padding: 2px 4px; border-radius: 5px; }
 .line-head .edit:hover { color: var(--ink); background: var(--surface-2); }
 .line-text { margin-top: 3px; font-size: 15px; line-height: 1.55; word-break: break-word; }
@@ -288,7 +291,7 @@ async function pollStatus() {
       const hw = s.hardware || {};
       const where = (hw.trocr || hw.simplehtr || '').replace(/ \((NVIDIA CUDA|AMD ROCm|Intel XPU)\)$/, '');
       setStatus('ready', `Ready · handwriting on ${where} · ${s.vocabulary_words.toLocaleString()} words`);
-      $('#status').title = `Text detection & printed text: ${hw.detection_and_printed}\nTrOCR: ${hw.trocr || 'not installed'}\nContext model: ${hw.context_model || 'not installed'}\nSimpleHTR: ${hw.simplehtr}\nCPU threads: ${hw.cpu_threads}`;
+      $('#status').title = `Text detection & printed text: ${hw.detection_and_printed}\nTrOCR: ${hw.trocr || 'not installed'}\nContext model: ${hw.context_model || 'not installed'}\nVision model: ${hw.vision_model || 'not connected'}\nSimpleHTR: ${hw.simplehtr}\nCPU threads: ${hw.cpu_threads}`;
       return;
     }
     setStatus('loading', 'Loading models…');
@@ -441,14 +444,17 @@ function renderLines(p) {
       el('div', { class: 'line-head' },
         el('span', { class: 'num' }, line.id + 1),
         el('span', { class: `badge ${line.engine}` }, line.engine === 'handwriting' ? 'Handwriting' : 'Printed'),
-        el('span', {}, { trocr: 'TrOCR', 'trocr+simplehtr': 'TrOCR + SimpleHTR agree', simplehtr: 'SimpleHTR', 'printed-ocr': 'printed model' }[line.reader] || ''),
+        el('span', {}, { trocr: 'TrOCR', 'trocr+simplehtr': 'TrOCR + SimpleHTR agree', simplehtr: 'SimpleHTR', 'printed-ocr': 'printed model', vlm: 'vision model' }[line.reader] || ''),
         el('span', { class: 'meter', title: `confidence ${pct(line.confidence)}%` },
           el('i', { style: `width:${pct(line.confidence)}%;background:${confColor(line.confidence)}` })),
         el('span', {}, `${pct(line.confidence)}%`),
         line.edited ? el('span', { class: 'edited' }, 'edited') : null,
+        line.needs_review && !line.edited ? el('span', { class: 'flag check', title: 'The readers disagree on this line (numbers, a medicine name, or a close call): please check it against the image' }, 'check') : null,
+        line.readers_agree ? el('span', { class: 'flag agree', title: 'TrOCR and the vision model read this line the same way' }, '2 readers agree') : null,
         el('button', { class: 'edit', title: 'Correct this line', onclick: () => editLine(line, text) }, '✎')),
       text,
-      ...[['Before vocabulary', line.trocr_reading], ['Printed model', line.printed_reading], ['SimpleHTR', line.simplehtr_reading]]
+      ...[['TrOCR', line.trocr_text], ['Vision model', line.vlm_reading], ['Before vocabulary', line.trocr_reading],
+          ['Printed model', line.printed_reading], ['SimpleHTR', line.simplehtr_reading]]
         .filter(([, t]) => t && t !== line.text)
         .map(([who, t]) => el('div', { class: 'also' }, `${who} read: `, el('q', {}, t))));
   }));
