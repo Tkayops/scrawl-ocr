@@ -183,6 +183,7 @@ textarea.vocab { width: 100%; min-height: 300px; padding: 10px; border: 1px soli
         <button role="radio" aria-checked="false" data-engine="local" title="Scrawl's own reader (TrOCR) on this computer: nothing leaves it">TrOCR</button>
         <button role="radio" aria-checked="false" data-engine="mineru" title="MinerU, running on this computer (./mineru_server.sh): nothing leaves it" hidden>MinerU</button>
         <button role="radio" aria-checked="true" data-engine="azure" title="Azure AI Document Intelligence: pages are sent to Microsoft Azure" hidden>Azure cloud</button>
+        <button role="radio" aria-checked="false" data-engine="google" title="Google Document AI: pages are sent to Google Cloud" hidden>Google cloud</button>
         <button role="radio" aria-checked="false" data-engine="mindee" title="Mindee OCR: pages are sent to Mindee" hidden>Mindee cloud</button>
       </div>
       <div class="seg local-only" role="radiogroup" aria-label="Reading mode" id="mode">
@@ -301,7 +302,7 @@ async function pollStatus() {
       const where = (hw.trocr || hw.simplehtr || '').replace(/ \((NVIDIA CUDA|AMD ROCm|Intel XPU)\)$/, '');
       setStatus('ready', `Ready · handwriting on ${where} · ${s.vocabulary_words.toLocaleString()} words`);
       showEngines(s);
-      $('#status').title = `Text detection & printed text: ${hw.detection_and_printed}\nTrOCR: ${hw.trocr || 'not installed'}\nContext model: ${hw.context_model || 'not installed'}\nVision model: ${hw.vision_model || 'not connected'}\nSimpleHTR: ${hw.simplehtr}\nCPU threads: ${hw.cpu_threads}\n${hw.mineru || ''}\n${hw.azure || ''}\n${hw.mindee || ''}`;
+      $('#status').title = `Text detection & printed text: ${hw.detection_and_printed}\nTrOCR: ${hw.trocr || 'not installed'}\nContext model: ${hw.context_model || 'not installed'}\nVision model: ${hw.vision_model || 'not connected'}\nSimpleHTR: ${hw.simplehtr}\nCPU threads: ${hw.cpu_threads}\n${hw.mineru || ''}\n${hw.azure || ''}\n${hw.google || ''}\n${hw.mindee || ''}`;
       if (!(s.mineru && s.mineru.available)) setTimeout(watchMinerU, 20000);  // MinerU may be started later
       return;
     }
@@ -313,6 +314,7 @@ function setStatus(kind, text) { const p = $('#status'); p.className = 'pill ' +
 let enginesShown = false;
 function showEngines(s) {  // the engine switch appears once there is more than TrOCR to choose from
   cloudDescriptions = { azure: s.azure && s.azure.configured ? s.azure.description : null,
+                        google: s.google && s.google.configured ? s.google.description : null,
                         mindee: s.mindee && s.mindee.configured ? s.mindee.description : null };
   const extra = Object.keys(cloudDescriptions).filter(k => cloudDescriptions[k]);
   if (s.mineru && s.mineru.available) extra.push('mineru');
@@ -341,8 +343,8 @@ $('#mode').addEventListener('click', e => {
 let cloudDescriptions = {};
 const engine = () => $('#engine').hidden ? 'local' : $('#engine [aria-checked="true"]').dataset.engine;
 function applyEngine() {
-  const which = engine(), cloud = which === 'azure' || which === 'mindee', own = which === 'local';
-  const name = { azure: 'Microsoft Azure', mindee: 'Mindee' }[which];
+  const which = engine(), cloud = ['azure', 'google', 'mindee'].includes(which), own = which === 'local';
+  const name = { azure: 'Microsoft Azure', google: 'Google', mindee: 'Mindee' }[which];
   $('#cloudNote').hidden = !cloud;
   $('#cloudNote').textContent = cloud ? `${name} cloud: pages you read are sent to ${name} (${cloudDescriptions[which]}). Switch to TrOCR or MinerU to keep them on this computer.` : '';
   $('#privacyLine').textContent = cloud ? `${name} cloud is selected: the document will be sent to ${name}.` :
@@ -496,7 +498,7 @@ function renderLines(p) {
       el('div', { class: 'line-head' },
         el('span', { class: 'num' }, line.id + 1),
         el('span', { class: `badge ${line.engine}` }, line.engine === 'handwriting' ? 'Handwriting' : 'Printed'),
-        el('span', {}, { azure: 'Azure', mindee: 'Mindee', mineru: 'MinerU', trocr: 'TrOCR', 'trocr+simplehtr': 'TrOCR + SimpleHTR agree', simplehtr: 'SimpleHTR', 'printed-ocr': 'printed model', vlm: 'vision model', 'vlm-page': 'vision model (whole page)' }[line.reader] || ''),
+        el('span', {}, { azure: 'Azure', google: 'Google', mindee: 'Mindee', mineru: 'MinerU', trocr: 'TrOCR', 'trocr+simplehtr': 'TrOCR + SimpleHTR agree', simplehtr: 'SimpleHTR', 'printed-ocr': 'printed model', vlm: 'vision model', 'vlm-page': 'vision model (whole page)' }[line.reader] || ''),
         el('span', { class: 'meter', title: `confidence ${pct(line.confidence)}%` },
           el('i', { style: `width:${pct(line.confidence)}%;background:${confColor(line.confidence)}` })),
         el('span', {}, `${pct(line.confidence)}%`),

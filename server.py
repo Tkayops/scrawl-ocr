@@ -55,6 +55,8 @@ def status():
                     'vision_model': _engine.vlm() is not None if ready else False,
                     'azure': {'configured': _engine.azure.configured(), 'description': _engine.azure.describe()}
                     if ready else None,
+                    'google': {'configured': _engine.google.configured(), 'description': _engine.google.describe()}
+                    if ready else None,
                     'mindee': {'configured': _engine.mindee.configured(), 'description': _engine.mindee.describe()}
                     if ready else None,
                     'mineru': {'available': _engine.mineru.available(), 'description': _engine.mineru.describe()}

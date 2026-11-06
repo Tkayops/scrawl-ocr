@@ -19,6 +19,9 @@ data/
 # Azure credentials (endpoint + key) - never commit
 azure.json
 mindee.json
+# Google Document AI settings and service-account key - never commit
+google.json
+google-key.json
 .venv-mineru/
 # MinerU upload store, in case it is started outside mineru_server.sh - may hold scanned pages
 blobs/

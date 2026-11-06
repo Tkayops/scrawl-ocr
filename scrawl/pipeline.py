@@ -13,7 +13,7 @@ import numpy as np
 from rapidfuzz import fuzz
 
 from . import context as clinical_context
-from . import azure, document, hardware, imaging, layout, mindee, mineru, structure, trocr
+from . import azure, document, google_docai, hardware, imaging, layout, mindee, mineru, structure, trocr
 from .vlm import VisionReader
 from .htr import HandwritingReader, tidy_punctuation
 from .layout import Region
@@ -32,7 +32,7 @@ NAME_FIELD = re.compile(r'name|surname|signature|signed|doctor|\bdr\b|nurse|clin
 @dataclass
 class Options:
     engine: str = 'auto'             # auto (Azure if configured, else local) | local (TrOCR) | mineru (local
-                                     # MinerU service) | azure | mindee (cloud!)
+                                     # MinerU service) | azure | google | mindee (cloud!)
     mode: str = 'auto'               # auto | handwriting | printed
     tta: bool = True                 # read each handwritten line at several stroke widths and average
     lexicon_strength: float = 3.0    # 0 = no dictionary correction; higher = trust the dictionary more
@@ -63,6 +63,7 @@ class Scrawl:
         self._vlm = VisionReader()
         self.azure = azure.AzureReader()
         self.mindee = mindee.MindeeReader()
+        self.google = google_docai.GoogleReader()
         self.mineru = mineru.MinerUReader()
 
     def vlm(self):
@@ -90,7 +91,7 @@ class Scrawl:
                 'trocr': self._trocr.device_name if self._trocr is not None else None,
                 'context_model': hardware.torch_device_name(self._context.device) if self._context is not None else None,
                 'vision_model': self._vlm.describe(), 'mineru': self.mineru.describe(), 'azure': self.azure.describe(),
-                'mindee': self.mindee.describe()}
+                'google': self.google.describe(), 'mindee': self.mindee.describe()}
 
     def reload_vocabulary(self) -> int:
         self.htr.lexicon = default_lexicon(SIMPLEHTR_DIR, [MEDICAL_VOCAB, self.custom_vocab])
@@ -103,7 +104,7 @@ class Scrawl:
         options = options or Options()
         start = time.time()
         engine = self.resolve_engine(options.engine)
-        read = {'azure': self.read_page_azure, 'mindee': self.read_page_mindee,
+        read = {'azure': self.read_page_azure, 'google': self.read_page_google, 'mindee': self.read_page_mindee,
                 'mineru': self.read_page_mineru}.get(engine, self.read_page)
         pages = [read(img, options) for img in imaging.load_pages(data, filename)]
         for number, page in enumerate(pages, 1):
@@ -115,6 +116,8 @@ class Scrawl:
     def resolve_engine(self, engine: str) -> str:
         if engine == 'azure' and not self.azure.configured():
             raise azure.AzureError(self.azure.problem())
+        if engine == 'google' and not self.google.configured():
+            raise google_docai.GoogleError(self.google.problem())
         if engine == 'mindee' and not self.mindee.configured():
             raise mindee.MindeeError(self.mindee.problem())
         if engine == 'mineru' and not self.mineru.available():
@@ -128,8 +131,19 @@ class Scrawl:
         bgr = azure.fit_page(bgr)
         result = self.azure.analyze(azure.encode_page(bgr))
         lines, extras = azure.to_lines(result, 0)
+        return self._cloud_page(bgr, lines, extras, options, float(result['pages'][0].get('angle') or 0))
+
+    def read_page_google(self, bgr: np.ndarray, options: Options) -> dict:
+        """Read a page with Google Document AI (the page image is sent to Google Cloud)."""
+        bgr = azure.fit_page(bgr)
+        lines, extras = google_docai.to_lines(self.google.process(azure.encode_page(bgr)), bgr)
+        return self._cloud_page(bgr, lines, extras, options)
+
+    def _cloud_page(self, bgr: np.ndarray, lines: List[dict], extras: dict, options: Options,
+                    angle: float = 0.0) -> dict:
+        """A page from a cloud engine's lines, key/value pairs, tables and checkboxes (Azure, Google)."""
         built = structure.build(lines)
-        # Azure's own key/value pairs and tables are usually better than Scrawl's layout rules on forms
+        # the service's own key/value pairs and tables are usually better than Scrawl's layout rules on forms
         fields = [{'label': kv['label'], 'value': kv['value'], 'line_ids': azure.line_ids_in(kv['boxes'], built['lines']),
                    'confidence': kv['confidence']} for kv in extras['key_values'] if kv['label'] and kv['value']]
         tables = [{'columns': t['columns'], 'rows': t['rows'], 'line_ids': azure.line_ids_in(t['boxes'], built['lines'])}
@@ -140,7 +154,7 @@ class Scrawl:
             built['document'] = document.build_blocks(built['lines'], built['rows'], built['fields'], built['tables'])
             built['formatted_text'] = document.render_text(built['document'])
         height, width = bgr.shape[:2]
-        page = {'width': width, 'height': height, 'deskew_degrees': round(float(result['pages'][0].get('angle') or 0), 2),
+        page = {'width': width, 'height': height, 'deskew_degrees': round(angle, 2),
                 'pen_layer': False, 'context_changes': 0, 'vision_changes': 0, 'suggestions': [],
                 'checkboxes': extras['checkboxes'], **built}
         if options.include_image:

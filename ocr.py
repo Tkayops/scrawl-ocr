@@ -15,10 +15,10 @@ from pathlib import Path
 def main() -> None:
     parser = argparse.ArgumentParser(description='Local OCR for messy handwriting and printed/structured documents.')
     parser.add_argument('inputs', nargs='+', type=Path, help='images (png, jpg, tif, ...) or PDFs')
-    parser.add_argument('--engine', choices=['auto', 'local', 'mineru', 'azure', 'mindee'], default='auto',
+    parser.add_argument('--engine', choices=['auto', 'local', 'mineru', 'azure', 'google', 'mindee'], default='auto',
                         help='auto: Azure if configured (azure.json / SCRAWL_AZURE_*), else local (TrOCR). '
                              'mineru: the local MinerU service (./mineru_server.sh). '
-                             'azure / mindee SEND THE PAGES TO THAT CLOUD SERVICE')
+                             'azure / google / mindee SEND THE PAGES TO THAT CLOUD SERVICE')
     parser.add_argument('--mode', choices=['auto', 'handwriting', 'printed'], default='auto',
                         help='auto decides per line; force one engine if you know what the page is')
     parser.add_argument('--format', choices=['txt', 'md', 'html', 'json', 'csv'], default='txt',

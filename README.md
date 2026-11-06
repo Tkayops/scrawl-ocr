@@ -202,6 +202,57 @@ Notes:
 * The key is only ever sent to Azure AI services addresses (`*.cognitiveservices.azure.com` and similar).
 * In Azure mode the local extras don't apply: dictionary correction, clinical context, vision model.
 
+### Optional: Google Document AI cloud engine (sends documents to Google)
+
+Scrawl can also send each page to **Google Cloud Document AI**. What comes back depends on the processor
+you create:
+
+| Processor | Returns | List price per 1,000 pages |
+|---|---|---|
+| **Enterprise Document OCR** | Text and layout. With its font-style add-on, every word is marked handwritten or printed. | about US$1.50, plus about US$6 for the add-on |
+| **Form Parser** | Text and layout, plus label/value pairs, tables and checkboxes | about US$30 |
+
+These are list prices seen in November 2026; check
+[Google's pricing page](https://cloud.google.com/document-ai/pricing). Google Cloud needs a billing account
+with a card, and new accounts get a US$300 trial credit.
+
+**Patient documents leave your machine and network.** The same rules apply as for Azure: a data processing
+agreement with Google, an approved location (`eu` or `us`), and Kenya Data Protection Act rules for health
+data. Try it on sample or anonymised forms first.
+
+1. In the Google Cloud console, pick a project with billing and enable the **Cloud Document AI API**.
+2. Go to **Document AI > Processors > Create processor**. Choose **Enterprise Document OCR** or **Form
+   Parser**, with location `eu` or `us`. Copy the processor's **Prediction endpoint**.
+3. Go to **IAM & Admin > Service accounts** and create one with the role **Document AI API User**. Under
+   **Keys > Add key > JSON**, download its key. Save it as `google-key.json` in the project folder, which
+   `.gitignore` covers, and treat it like a password.
+4. Create `google.json` in the project folder (also in `.gitignore`):
+
+   ```json
+   {"endpoint": "https://eu-documentai.googleapis.com/v1/projects/<project>/locations/eu/processors/<processor-id>:process",
+    "credentials": "google-key.json"}
+   ```
+
+   Or set `SCRAWL_GOOGLE_ENDPOINT` and `SCRAWL_GOOGLE_CREDENTIALS`. Without a key file, the credentials
+   from `gcloud auth application-default login` are used.
+5. Restart the server and choose **Google cloud** in the toolbar, or use `--engine google`.
+   * Google is never picked automatically.
+   * The banner says pages are sent to Google.
+
+Notes:
+* **Where things are sent:**
+  * The key only goes to Google's sign-in service (`oauth2.googleapis.com`).
+  * Pages only go to `https://…documentai.googleapis.com`.
+  * A key file that names any other sign-in address is refused.
+* **Handwriting flag:**
+  * Scrawl asks the OCR processor for the font-style add-on. `SCRAWL_GOOGLE_STYLE_INFO=0` turns it off.
+  * When the add-on is off, or with Form Parser (which doesn't take it), a line counts as handwritten only
+    when its ink is coloured.
+* **Form Parser:** its label/value pairs, tables and checkboxes replace Scrawl's own layout rules.
+* **Tested so far:** only against a stand-in server that mimics Google's sign-in and Document AI
+  replies, for both processor types, plus the refusals. The first run against real Google is still to
+  come.
+
 ### Optional: Mindee cloud engine (free 14-day trial, no card; sends documents to Mindee)
 
 Mindee's trial gives **200 pages over 14 days**, with no credit card. That's enough to compare it with
@@ -251,11 +302,11 @@ The main options:
 * `--mode auto|handwriting|printed`
 * `--lexicon-strength 0..6` (default 3)
 * `--printed-threshold` (default 0.9)
-* `--engine auto|local|mineru|azure|mindee`:
+* `--engine auto|local|mineru|azure|google|mindee`:
   * `local` is TrOCR.
   * `mineru` is the local MinerU service.
-  * `azure` and `mindee` send pages to that service.
-  * `auto` uses Azure only when it's configured, and never MinerU or Mindee.
+  * `azure`, `google` and `mindee` send pages to that service.
+  * `auto` uses Azure only when it's configured, and never MinerU, Google or Mindee.
 * `--fast`: SimpleHTR instead of TrOCR
 * `--no-context`: skip reconstructing unclear words from the surrounding text
 * `--no-vlm`: don't ask a local vision-language model even if one is running
@@ -433,7 +484,7 @@ ocr.py               command line
 server.py, web/      local web UI (127.0.0.1 only)
 scrawl/              pipeline: hardware (GPU / threads), imaging (incl. pen layer), layout, htr (SimpleHTR),
                      trocr, context (clinical language model), vlm (local vision model), mineru (local
-                     MinerU service), azure and mindee (cloud engines), ctc, lexicon,
+                     MinerU service), azure, google_docai and mindee (cloud engines), ctc, lexicon,
                      printed, structure,
                      document (formatting), export
 vocab/               your custom words
